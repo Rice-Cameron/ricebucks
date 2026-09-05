@@ -68,4 +68,5 @@ omarchy-budget list
 ```
 
 ## License
-MIT
+
+[MIT](LICENSE)
