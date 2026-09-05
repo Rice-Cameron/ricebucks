@@ -294,7 +294,7 @@ shift || true
 
 case "$action" in
   toggle|open|show)
-    ipc_toggle
+    cmd_toggle
     ;;
   status|overview)
     cmd_status

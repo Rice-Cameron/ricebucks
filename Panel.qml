@@ -1102,7 +1102,6 @@ Panel {
               spacing: Style.space(8)
 
               Column {
-                id: incomeCol
                 spacing: Style.space(2)
                 Text {
                   id: incomeLabel
@@ -1121,7 +1120,6 @@ Panel {
               }
 
               Column {
-                id: savingsCol
                 spacing: Style.space(2)
                 Text {
                   id: savingsLabel
