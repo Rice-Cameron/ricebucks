@@ -34,6 +34,28 @@ Link the CLI script:
 ln -sf ~/.config/omarchy/plugins/cameronri.budget/bin/omarchy-budget ~/.local/bin/omarchy-budget
 ```
 
+## Removal
+
+To disable and remove the plugin from Omarchy:
+```bash
+omarchy plugin remove cameronri.budget --yes
+```
+
+Remove the CLI symlink:
+```bash
+rm -f ~/.local/bin/omarchy-budget
+```
+
+*(Optional)* To purge all local budget data and transaction history:
+```bash
+rm -f ~/.local/state/omarchy/budget.json
+```
+
+## Dependencies
+
+- **Quickshell** (included with Omarchy shell)
+- **jq** (standard on Omarchy, used by the `omarchy-budget` CLI)
+
 ## Usage
 
 ### Hotkey & Desktop
