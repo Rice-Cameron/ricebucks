@@ -270,8 +270,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(480))
-    contentHeight: panel.fittedContentHeight(scrollContent.implicitHeight + Style.space(24), Style.space(680))
+    contentWidth: panel.fittedContentWidth(Style.space(500))
+    contentHeight: panel.fittedContentHeight(scrollContent.implicitHeight + Style.space(24), Style.space(700))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -282,12 +282,13 @@ Panel {
         || savingsInput.activeFocus
         || customCatInput.activeFocus
         || newCategoryInput.activeFocus
+        || root.editingCategory !== ""
       onCloseRequested: root.close()
 
       Flickable {
         id: flickArea
         anchors.fill: parent
-        contentWidth: width
+        contentWidth: scrollContent.width
         contentHeight: scrollContent.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -296,7 +297,9 @@ Panel {
 
         Column {
           id: scrollContent
-          width: flickArea.width
+          width: flickArea.width - Style.space(16)
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(2)
           spacing: Style.space(16)
 
           // -----------------------------------------------------------------
@@ -358,15 +361,18 @@ Panel {
           BorderSurface {
             visible: root.feedbackText !== ""
             width: parent.width
+            implicitHeight: feedbackTextLabel.implicitHeight + Style.space(14)
+            height: implicitHeight
             radius: Style.cornerRadius
             color: Style.selectedFillFor(root.foreground, root.accent)
-            topPadding: Style.space(6)
-            bottomPadding: Style.space(6)
-            leftPadding: Style.space(10)
-            rightPadding: Style.space(10)
 
             Text {
-              width: parent.width
+              id: feedbackTextLabel
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(12)
+              anchors.rightMargin: Style.space(12)
               text: root.feedbackText
               color: root.foreground
               font.family: root.fontFamily
@@ -386,14 +392,22 @@ Panel {
             // Monthly Income
             BorderSurface {
               width: (parent.width - Style.space(8)) / 2
+              implicitHeight: incomeCol.implicitHeight + Style.space(18)
+              height: implicitHeight
               radius: Style.cornerRadius
               border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
               border.width: 1
               color: Style.controlFill(false, false, root.foreground, root.accent)
-              padding: Style.space(10)
 
               Column {
+                id: incomeCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
                 spacing: Style.space(3)
+
                 Text {
                   text: "MONTHLY INCOME"
                   color: root.dim
@@ -414,14 +428,22 @@ Panel {
             // Savings Goal
             BorderSurface {
               width: (parent.width - Style.space(8)) / 2
+              implicitHeight: savingsCol.implicitHeight + Style.space(18)
+              height: implicitHeight
               radius: Style.cornerRadius
               border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
               border.width: 1
               color: Style.controlFill(false, false, root.foreground, root.accent)
-              padding: Style.space(10)
 
               Column {
+                id: savingsCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
                 spacing: Style.space(3)
+
                 Text {
                   text: "SAVINGS (" + root.savingsPercent + "%)"
                   color: root.dim
@@ -442,14 +464,22 @@ Panel {
             // Total Spent
             BorderSurface {
               width: (parent.width - Style.space(8)) / 2
+              implicitHeight: spentCol.implicitHeight + Style.space(18)
+              height: implicitHeight
               radius: Style.cornerRadius
               border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
               border.width: 1
               color: Style.controlFill(false, false, root.foreground, root.accent)
-              padding: Style.space(10)
 
               Column {
+                id: spentCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
                 spacing: Style.space(3)
+
                 Text {
                   text: "TOTAL SPENT"
                   color: root.dim
@@ -470,16 +500,24 @@ Panel {
             // Remaining Budget
             BorderSurface {
               width: (parent.width - Style.space(8)) / 2
+              implicitHeight: remCol.implicitHeight + Style.space(18)
+              height: implicitHeight
               radius: Style.cornerRadius
               border.color: root.isOverBudget ? root.urgent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
               border.width: 1
               color: root.isOverBudget
                 ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.15)
                 : Style.controlFill(false, false, root.foreground, root.accent)
-              padding: Style.space(10)
 
               Column {
+                id: remCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
                 spacing: Style.space(3)
+
                 Text {
                   text: root.isOverBudget ? "OVER BUDGET!" : "REMAINING BUDGET"
                   color: root.isOverBudget ? root.urgent : root.dim
@@ -751,20 +789,25 @@ Panel {
               spacing: Style.space(8)
 
               // Add Category Row
-              Row {
+              Item {
                 width: parent.width
-                spacing: Style.space(8)
+                implicitHeight: Math.max(newCategoryInput.implicitHeight, addCategoryBtn.implicitHeight)
+                height: implicitHeight
 
                 TextField {
                   id: newCategoryInput
-                  width: parent.width - addCategoryBtn.width - Style.space(8)
+                  anchors.left: parent.left
+                  anchors.right: addCategoryBtn.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
                   placeholderText: "New category name..."
                   onAccepted: addCategoryBtn.clicked()
                 }
 
                 Button {
                   id: addCategoryBtn
-                  width: Style.space(75)
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
                   text: "+ Add"
                   bordered: true
                   onClicked: {
@@ -777,6 +820,14 @@ Panel {
               }
 
               // List of categories to edit / delete
+              Text {
+                visible: root.categories.length === 0
+                text: "No categories configured. Add one above!"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
               Column {
                 width: parent.width
                 spacing: Style.space(6)
@@ -785,19 +836,26 @@ Panel {
                   model: root.categories
 
                   BorderSurface {
+                    id: catSurface
                     required property string modelData
                     width: parent.width
+                    implicitHeight: (root.editingCategory === modelData ? editCardItem.height : displayCardItem.height) + Style.space(16)
+                    height: implicitHeight
                     radius: Style.cornerRadius
                     border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
                     border.width: 1
                     color: Style.controlFill(false, false, root.foreground, root.accent)
-                    padding: Style.space(6)
 
                     // Display Row (When not editing this item)
                     Item {
+                      id: displayCardItem
                       visible: root.editingCategory !== modelData
-                      width: parent.width
-                      implicitHeight: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight)
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      anchors.leftMargin: Style.space(10)
+                      anchors.rightMargin: Style.space(10)
+                      height: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight, Style.space(26))
 
                       Text {
                         id: catNameLabel
@@ -817,22 +875,26 @@ Panel {
                         id: actionBtns
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(4)
+                        spacing: Style.space(6)
 
                         Button {
                           text: "Rename"
-                          bordered: false
+                          bordered: true
                           fontSize: Style.font.caption
+                          verticalPadding: Style.space(4)
+                          horizontalPadding: Style.space(8)
                           onClicked: {
-                            root.editingCategory = modelData
                             renameInput.text = modelData
+                            root.editingCategory = modelData
                           }
                         }
 
                         Button {
                           text: "Delete"
-                          bordered: false
+                          bordered: true
                           fontSize: Style.font.caption
+                          verticalPadding: Style.space(4)
+                          horizontalPadding: Style.space(8)
                           onClicked: root.deleteCategory(modelData)
                         }
                       }
@@ -840,9 +902,14 @@ Panel {
 
                     // Edit Row (When editing this item)
                     Item {
+                      id: editCardItem
                       visible: root.editingCategory === modelData
-                      width: parent.width
-                      implicitHeight: Math.max(renameInput.implicitHeight, renameActions.implicitHeight)
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      anchors.leftMargin: Style.space(10)
+                      anchors.rightMargin: Style.space(10)
+                      height: Math.max(renameInput.implicitHeight, renameActions.implicitHeight, Style.space(30))
 
                       TextField {
                         id: renameInput
@@ -858,13 +925,15 @@ Panel {
                         id: renameActions
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(4)
+                        spacing: Style.space(6)
 
                         Button {
                           id: saveRenameBtn
                           text: "Save"
                           bordered: true
                           fontSize: Style.font.caption
+                          verticalPadding: Style.space(4)
+                          horizontalPadding: Style.space(8)
                           onClicked: {
                             if (renameInput.text.trim()) {
                               root.renameCategory(modelData, renameInput.text.trim())
@@ -874,8 +943,10 @@ Panel {
 
                         Button {
                           text: "Cancel"
-                          bordered: false
+                          bordered: true
                           fontSize: Style.font.caption
+                          verticalPadding: Style.space(4)
+                          horizontalPadding: Style.space(8)
                           onClicked: root.editingCategory = ""
                         }
                       }
@@ -988,11 +1059,17 @@ Panel {
                   border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
                   border.width: 1
                   color: Style.controlFill(false, false, root.foreground, root.accent)
-                  padding: Style.space(8)
+                  implicitHeight: txRowItem.height + Style.space(16)
+                  height: implicitHeight
 
                   Item {
-                    width: parent.width
-                    implicitHeight: Math.max(txInfoCol.implicitHeight, txAmountCol.implicitHeight, txDeleteBtn.implicitHeight)
+                    id: txRowItem
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: Style.space(10)
+                    anchors.rightMargin: Style.space(10)
+                    height: Math.max(txInfoCol.implicitHeight, txAmountCol.implicitHeight, txDeleteBtn.implicitHeight)
 
                     Column {
                       id: txInfoCol
