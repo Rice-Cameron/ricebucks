@@ -313,6 +313,7 @@ Panel {
       Flickable {
         id: flickArea
         anchors.fill: parent
+        interactive: root.dragActiveIndex === -1
         contentWidth: scrollContent.width
         contentHeight: scrollContent.implicitHeight
         clip: true
@@ -884,6 +885,59 @@ Panel {
                       return 0;
                     }
 
+                    // Stationary drag grip area attached to the slotItem (never shifts during drag, 0 lag, 0 flicker!)
+                    MouseArea {
+                      id: dragHandleArea
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      anchors.bottom: parent.bottom
+                      width: Style.space(34)
+                      z: 20
+                      cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                      hoverEnabled: true
+                      preventStealing: true
+                      visible: root.editingCategory === ""
+
+                      onPressed: function(mouse) {
+                        root.dragActiveIndex = slotItem.index
+                        root.dragTargetIndex = slotItem.index
+                        root.dragStartY = mouse.y
+                        catSurface.dragY = 0
+                      }
+
+                      onPositionChanged: function(mouse) {
+                        if (root.dragActiveIndex === slotItem.index) {
+                          var deltaY = mouse.y - root.dragStartY
+                          var totalH = root.categories.length * slotItem.slotHeight
+                          var minY = -slotItem.y
+                          var maxY = Math.max(0, totalH - slotItem.y - catSurface.height)
+                          catSurface.dragY = Math.max(minY, Math.min(maxY, deltaY))
+
+                          var target = Math.max(0, Math.min(root.categories.length - 1, Math.round((slotItem.y + catSurface.dragY) / slotItem.slotHeight)))
+                          root.dragTargetIndex = target
+                        }
+                      }
+
+                      onReleased: function(mouse) {
+                        if (root.dragActiveIndex === slotItem.index) {
+                          var from = root.dragActiveIndex
+                          var to = root.dragTargetIndex
+                          catSurface.dragY = 0
+                          root.dragActiveIndex = -1
+                          root.dragTargetIndex = -1
+                          if (to >= 0 && to !== from) {
+                            root.moveCategory(from, to)
+                          }
+                        }
+                      }
+
+                      onCanceled: {
+                        catSurface.dragY = 0
+                        root.dragActiveIndex = -1
+                        root.dragTargetIndex = -1
+                      }
+                    }
+
                     BorderSurface {
                       id: catSurface
                       readonly property bool isDragged: root.dragActiveIndex === slotItem.index
@@ -903,7 +957,7 @@ Panel {
 
                       Behavior on y {
                         enabled: root.dragActiveIndex !== -1 && !catSurface.isDragged
-                        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
+                        NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
                       }
 
                       // Display Row (When not editing this item)
@@ -917,7 +971,7 @@ Panel {
                         anchors.rightMargin: Style.space(10)
                         height: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight, Style.space(26))
 
-                        // Drag handle grip
+                        // Visual grip dots
                         Item {
                           id: dragHandle
                           width: Style.space(24)
@@ -929,7 +983,7 @@ Panel {
                             anchors.centerIn: parent
                             columns: 2
                             spacing: Style.space(3)
-                            opacity: dragHandleArea.containsMouse || catSurface.isDragged ? 1.0 : 0.45
+                            opacity: (dragHandleArea.containsMouse || catSurface.isDragged) ? 1.0 : 0.45
 
                             Repeater {
                               model: 6
@@ -937,60 +991,8 @@ Panel {
                                 width: Style.space(3)
                                 height: Style.space(3)
                                 radius: width / 2
-                                color: dragHandleArea.containsMouse || catSurface.isDragged ? root.accent : root.foreground
+                                color: (dragHandleArea.containsMouse || catSurface.isDragged) ? root.accent : root.foreground
                               }
-                            }
-                          }
-
-                          MouseArea {
-                            id: dragHandleArea
-                            anchors.fill: parent
-                            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                            hoverEnabled: true
-                            preventStealing: true
-
-                            onPressed: function(mouse) {
-                              root.dragActiveIndex = slotItem.index
-                              root.dragTargetIndex = slotItem.index
-                              catSurface.dragY = 0
-                              var pt = dragHandleArea.mapToItem(categoryListCol, mouse.x, mouse.y)
-                              root.dragStartY = pt.y
-                            }
-
-                            onPositionChanged: function(mouse) {
-                              if (root.dragActiveIndex === slotItem.index) {
-                                var pt = dragHandleArea.mapToItem(categoryListCol, mouse.x, mouse.y)
-                                var cursorInList = pt.y - catSurface.dragY
-                                var deltaY = cursorInList - root.dragStartY
-
-                                var totalH = root.categories.length * slotItem.slotHeight
-                                var minY = -slotItem.y
-                                var maxY = Math.max(0, totalH - slotItem.y - catSurface.height)
-                                catSurface.dragY = Math.max(minY, Math.min(maxY, deltaY))
-
-                                var cardCenterY = slotItem.y + catSurface.dragY + (catSurface.height / 2)
-                                var target = Math.max(0, Math.min(root.categories.length - 1, Math.floor(cardCenterY / slotItem.slotHeight)))
-                                root.dragTargetIndex = target
-                              }
-                            }
-
-                            onReleased: function(mouse) {
-                              if (root.dragActiveIndex === slotItem.index) {
-                                var from = root.dragActiveIndex
-                                var to = root.dragTargetIndex
-                                catSurface.dragY = 0
-                                root.dragActiveIndex = -1
-                                root.dragTargetIndex = -1
-                                if (to >= 0 && to !== from) {
-                                  root.moveCategory(from, to)
-                                }
-                              }
-                            }
-
-                            onCanceled: {
-                              catSurface.dragY = 0
-                              root.dragActiveIndex = -1
-                              root.dragTargetIndex = -1
                             }
                           }
                         }
