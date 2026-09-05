@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "cameronri.budget",
+  "name": "Budget Tracker",
+  "version": "1.0.0",
+  "author": "cameronri",
+  "description": "Monthly income, savings target, and category spending tracker",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Budget Tracker",
+    "description": "Spending and budget tracker with categories and savings targets",
+    "category": "Finance",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

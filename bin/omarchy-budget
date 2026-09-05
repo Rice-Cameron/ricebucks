@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+
+# omarchy-budget: CLI companion for the Omarchy Budget & Spending plugin
+# Usage:
+#   omarchy-budget                    Toggle UI popup
+#   omarchy-budget add <amt> <cat>    Add a new purchase
+#   omarchy-budget status             Display budget summary
+#   omarchy-budget income <amount>    Set monthly income
+#   omarchy-budget savings <percent>  Set savings percentage
+#   omarchy-budget list               List recent transactions
+
+set -euo pipefail
+
+STATE_FILE="$HOME/.local/state/omarchy/budget.json"
+
+ipc_call() {
+  local method="$1"
+  shift
+  quickshell ipc -p /usr/share/omarchy/shell call cameronri.budget "$method" "$@" 2>/dev/null || true
+}
+
+ensure_state_file() {
+  if [[ ! -f "$STATE_FILE" ]]; then
+    mkdir -p "$(dirname "$STATE_FILE")"
+    cat << 'JSON' > "$STATE_FILE"
+{
+  "version": 1,
+  "income": 0,
+  "savingsPercent": 20,
+  "categories": [
+    "Rent + Utilities",
+    "Groceries",
+    "Eating Out",
+    "Insurance",
+    "Car Payment",
+    "Random Fun Things",
+    "Other"
+  ],
+  "expenses": []
+}
+JSON
+  fi
+}
+
+cmd_toggle() {
+  omarchy-shell shell toggle cameronri.budget >/dev/null 2>&1 || true
+}
+
+cmd_add() {
+  local amount="${1:-}"
+  local category="${2:-Other}"
+  local note="${3:-}"
+
+  if [[ -z "$amount" ]]; then
+    echo "Usage: omarchy-budget add <amount> [category] [note]"
+    echo "Example: omarchy-budget add 45.50 Groceries \"Trader Joe's\""
+    exit 1
+  fi
+
+  # Call via IPC if running
+  local res
+  res=$(ipc_call add "$amount" "$category" "$note")
+  if [[ "$res" == "ok" ]]; then
+    echo "✓ Added \$$amount to '$category' ($note)"
+    return 0
+  fi
+
+  # Fallback: direct JSON modification
+  ensure_state_file
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+  local id
+  id="$(date +%s)-$RANDOM"
+
+  jq --arg amt "$amount" --arg cat "$category" --arg note "$note" --arg date "$now" --arg id "$id" '
+    .expenses = [{id: $id, amount: ($amt | tonumber), category: $cat, note: $note, date: $date}] + .expenses |
+    if (.categories | index($cat)) == null then .categories += [$cat] else . end
+  ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+
+  echo "✓ Added \$$amount to '$category' ($note)"
+}
+
+cmd_income() {
+  local amount="${1:-}"
+  if [[ -z "$amount" ]]; then
+    echo "Usage: omarchy-budget income <amount>"
+    exit 1
+  fi
+
+  local res
+  res=$(ipc_call setIncome "$amount")
+  if [[ "$res" != "ok" ]]; then
+    ensure_state_file
+    jq --arg amt "$amount" '.income = ($amt | tonumber)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  fi
+  echo "✓ Monthly income set to \$$amount"
+}
+
+cmd_savings() {
+  local pct="${1:-}"
+  if [[ -z "$pct" ]]; then
+    echo "Usage: omarchy-budget savings <percent>"
+    exit 1
+  fi
+
+  local res
+  res=$(ipc_call setSavings "$pct")
+  if [[ "$res" != "ok" ]]; then
+    ensure_state_file
+    jq --arg pct "$pct" '.savingsPercent = ($pct | tonumber)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  fi
+  echo "✓ Savings goal set to ${pct}%"
+}
+
+cmd_status() {
+  ensure_state_file
+  local cur_month
+  cur_month=$(date +"%Y-%m")
+  local month_name
+  month_name=$(date +"%B %Y")
+
+  local data
+  data=$(jq -r --arg month "$cur_month" '
+    def sum_by_cat(c): [.expenses[] | select(.date | startswith($month)) | select(.category == c) | .amount] | add // 0;
+    def total_spent: [.expenses[] | select(.date | startswith($month)) | .amount] | add // 0;
+    
+    {
+      income: (.income // 0),
+      savingsPercent: (.savingsPercent // 20),
+      savingsTarget: ((.income // 0) * ((.savingsPercent // 20) / 100)),
+      totalSpent: total_spent,
+      remaining: ((.income // 0) - ((.income // 0) * ((.savingsPercent // 20) / 100)) - total_spent),
+      categories: [
+        .categories[] as $cat |
+        {
+          name: $cat,
+          total: sum_by_cat($cat),
+          count: ([.expenses[] | select(.date | startswith($month)) | select(.category == $cat)] | length)
+        }
+      ] | sort_by(-.total)
+    }
+  ' "$STATE_FILE")
+
+  local income savings_pct savings_target total_spent remaining
+  income=$(echo "$data" | jq -r '.income')
+  savings_pct=$(echo "$data" | jq -r '.savingsPercent')
+  savings_target=$(echo "$data" | jq -r '.savingsTarget')
+  total_spent=$(echo "$data" | jq -r '.totalSpent')
+  remaining=$(echo "$data" | jq -r '.remaining')
+
+  echo "=========================================================="
+  printf "   $  SPENDING & BUDGET TRACKER  -  %s\n" "$month_name"
+  echo "=========================================================="
+  printf "  Monthly Income:     \$%'.2f\n" "$income"
+  printf "  Savings Goal (%s%%): \$%'.2f\n" "$savings_pct" "$savings_target"
+  printf "  Total Spent:        \$%'.2f\n" "$total_spent"
+  echo "  --------------------------------------------------------"
+  if [[ "$remaining" == -* ]]; then
+    printf "  Remaining Budget:  \033[1;31m\$%'.2f (OVER BUDGET!)\033[0m\n" "$remaining"
+  else
+    printf "  Remaining Budget:  \033[1;32m\$%'.2f\033[0m\n" "$remaining"
+  fi
+  echo "=========================================================="
+  echo "  CATEGORY RUNNING TOTALS:"
+  echo "$data" | jq -r --argjson total "$total_spent" '
+    .categories[] | 
+    select(.total > 0 or .count > 0) |
+    [
+      .name,
+      (.total | tostring),
+      (if $total > 0 then ((.total / $total * 100 * 10 | round) / 10 | tostring) + "%" else "0%" end),
+      (.count | tostring)
+    ] | @tsv
+  ' | while IFS=$'\t' read -r name tot pct count; do
+    printf "    %-22s \$%8.2f  (%6s)  [%s tx]\n" "$name" "$tot" "$pct" "$count"
+  done
+  echo "=========================================================="
+}
+
+cmd_list() {
+  ensure_state_file
+  local cur_month
+  cur_month=$(date +"%Y-%m")
+
+  echo "Recent transactions for this month:"
+  jq -r --arg month "$cur_month" '
+    .expenses[] | select(.date | startswith($month)) |
+    [
+      (.date | split("T")[0]),
+      .category,
+      (.amount | tostring),
+      (.note // "")
+    ] | @tsv
+  ' "$STATE_FILE" | head -n 15 | while IFS=$'\t' read -r dt cat amt note; do
+    printf "  %s | %-18s | \$%7.2f | %s\n" "$dt" "$cat" "$amt" "$note"
+  done
+}
+
+# Subcommand dispatch
+action="${1:-toggle}"
+shift || true
+
+case "$action" in
+  toggle|open|show)
+    cmd_toggle
+    ;;
+  add)
+    cmd_add "$@"
+    ;;
+  income)
+    cmd_income "$@"
+    ;;
+  savings|save)
+    cmd_savings "$@"
+    ;;
+  status|summary)
+    cmd_status
+    ;;
+  list)
+    cmd_list
+    ;;
+  *)
+    echo "Omarchy Budget & Spending Tracker"
+    echo "Usage:"
+    echo "  omarchy-budget                    Toggle popup in status bar"
+    echo "  omarchy-budget add <amount> [cat] [note]  Add purchase"
+    echo "  omarchy-budget status             Show terminal overview"
+    echo "  omarchy-budget income <amount>    Set monthly income"
+    echo "  omarchy-budget savings <percent>  Set savings goal percent"
+    echo "  omarchy-budget list               List purchases"
+    ;;
+esac
