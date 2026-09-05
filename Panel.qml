@@ -34,7 +34,6 @@ Panel {
   property int dragActiveIndex: -1
   property int dragTargetIndex: -1
   property real dragStartY: 0
-  property real dragCurrentY: 0
 
   // Derived calculations
   readonly property string currentMonth: Model.currentMonthKey()
@@ -888,6 +887,7 @@ Panel {
                     BorderSurface {
                       id: catSurface
                       readonly property bool isDragged: root.dragActiveIndex === slotItem.index
+                      property real dragY: 0
                       width: parent.width
                       implicitHeight: (root.editingCategory === slotItem.modelData ? editCardItem.height : displayCardItem.height) + Style.space(16)
                       height: implicitHeight
@@ -899,10 +899,10 @@ Panel {
                         : Style.controlFill(false, false, root.foreground, root.accent)
                       opacity: isDragged ? 0.95 : 1.0
 
-                      y: isDragged ? (root.dragCurrentY - root.dragStartY) : slotItem.shiftOffset
+                      y: isDragged ? dragY : slotItem.shiftOffset
 
                       Behavior on y {
-                        enabled: !catSurface.isDragged
+                        enabled: root.dragActiveIndex !== -1 && !catSurface.isDragged
                         NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
                       }
 
@@ -952,20 +952,24 @@ Panel {
                             onPressed: function(mouse) {
                               root.dragActiveIndex = slotItem.index
                               root.dragTargetIndex = slotItem.index
-                              var pt = dragHandleArea.mapToItem(null, mouse.x, mouse.y)
+                              catSurface.dragY = 0
+                              var pt = dragHandleArea.mapToItem(categoryListCol, mouse.x, mouse.y)
                               root.dragStartY = pt.y
-                              root.dragCurrentY = pt.y
                             }
 
                             onPositionChanged: function(mouse) {
                               if (root.dragActiveIndex === slotItem.index) {
-                                var pt = dragHandleArea.mapToItem(null, mouse.x, mouse.y)
-                                root.dragCurrentY = pt.y
+                                var pt = dragHandleArea.mapToItem(categoryListCol, mouse.x, mouse.y)
+                                var cursorInList = pt.y - catSurface.dragY
+                                var deltaY = cursorInList - root.dragStartY
 
-                                var deltaY = root.dragCurrentY - root.dragStartY
-                                var slotH = slotItem.slotHeight
-                                var slots = Math.round(deltaY / slotH)
-                                var target = Math.max(0, Math.min(root.categories.length - 1, root.dragActiveIndex + slots))
+                                var totalH = root.categories.length * slotItem.slotHeight
+                                var minY = -slotItem.y
+                                var maxY = Math.max(0, totalH - slotItem.y - catSurface.height)
+                                catSurface.dragY = Math.max(minY, Math.min(maxY, deltaY))
+
+                                var cardCenterY = slotItem.y + catSurface.dragY + (catSurface.height / 2)
+                                var target = Math.max(0, Math.min(root.categories.length - 1, Math.floor(cardCenterY / slotItem.slotHeight)))
                                 root.dragTargetIndex = target
                               }
                             }
@@ -974,6 +978,7 @@ Panel {
                               if (root.dragActiveIndex === slotItem.index) {
                                 var from = root.dragActiveIndex
                                 var to = root.dragTargetIndex
+                                catSurface.dragY = 0
                                 root.dragActiveIndex = -1
                                 root.dragTargetIndex = -1
                                 if (to >= 0 && to !== from) {
@@ -983,6 +988,7 @@ Panel {
                             }
 
                             onCanceled: {
+                              catSurface.dragY = 0
                               root.dragActiveIndex = -1
                               root.dragTargetIndex = -1
                             }
