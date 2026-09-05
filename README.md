@@ -9,7 +9,7 @@ A native [Omarchy](https://omarchy.org/) shell plugin for personal spending, mon
 - **Bar Widget**: Displays a `$` icon in the Omarchy bar with tooltip balances and over-budget alerts.
 - **Monthly Income & Savings Target**: Set your monthly income and savings percent (e.g. 20%) to dynamically calculate dollar savings reserved.
 - **Remaining Budget Tracker**: Automatically calculates $\text{Income} - \text{Savings Target} - \text{Spending}$.
-- **Category Management**: Full support to add, rename, and delete categories directly from the desktop popup or the CLI.
+- **Category Management**: Full support to add, rename, delete, and drag-to-reorder categories directly from the desktop popup or the CLI.
 - **Running Totals**: See spending totals per category, percentage share of total monthly expenses, and visual proportion meters.
 - **Transaction History**: View recent purchases and delete mistaken entries.
 - **CLI Companion**: Full command-line companion script `omarchy-budget`.
@@ -39,7 +39,7 @@ ln -sf ~/.config/omarchy/plugins/cameronri.budget/bin/omarchy-budget ~/.local/bi
 ### Hotkey & Desktop
 - **Super + B**: Toggle the budget panel popup.
 - **Omarchy Menu**: Search `budget` or `spending` from <kbd>Super</kbd> + <kbd>Space</kbd>.
-- **Manage Categories**: Click the **Manage** button in the popup to add new categories, rename existing ones, or delete categories (expenses in deleted categories are cleanly moved to "Other").
+- **Manage Categories**: Click the **Manage** button in the popup to add new categories, rename existing ones, delete categories (expenses are moved to "Other"), or grab the handle on any category card to smoothly drag and reorder.
 
 ### CLI Commands
 ```bash
@@ -61,6 +61,7 @@ omarchy-budget categories                     # List all categories
 omarchy-budget category add "Subscriptions"   # Add new category
 omarchy-budget category rename "Old" "New"    # Rename category
 omarchy-budget category delete "Category"     # Delete category
+omarchy-budget category move 0 3              # Reorder category from index 0 to 3
 
 # List transactions
 omarchy-budget list
