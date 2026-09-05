@@ -2,12 +2,16 @@
 
 # omarchy-budget: CLI companion for the Omarchy Budget & Spending plugin
 # Usage:
-#   omarchy-budget                    Toggle UI popup
-#   omarchy-budget add <amt> <cat>    Add a new purchase
-#   omarchy-budget status             Display budget summary
-#   omarchy-budget income <amount>    Set monthly income
-#   omarchy-budget savings <percent>  Set savings percentage
-#   omarchy-budget list               List recent transactions
+#   omarchy-budget                       Toggle UI popup
+#   omarchy-budget add <amt> <cat>       Add a new purchase
+#   omarchy-budget status                Display budget summary
+#   omarchy-budget income <amount>       Set monthly income
+#   omarchy-budget savings <percent>     Set savings percentage
+#   omarchy-budget list                  List recent transactions
+#   omarchy-budget categories            List categories
+#   omarchy-budget category add <name>   Add category
+#   omarchy-budget category rename <old> <new>  Rename category
+#   omarchy-budget category delete <name>       Delete category
 
 set -euo pipefail
 
@@ -28,12 +32,12 @@ ensure_state_file() {
   "income": 0,
   "savingsPercent": 20,
   "categories": [
-    "Rent + Utilities",
+    "Housing",
     "Groceries",
-    "Eating Out",
-    "Insurance",
-    "Car Payment",
-    "Random Fun Things",
+    "Dining Out",
+    "Transportation",
+    "Utilities",
+    "Entertainment",
     "Other"
   ],
   "expenses": []
@@ -196,6 +200,73 @@ cmd_list() {
   done
 }
 
+cmd_category() {
+  local sub="${1:-list}"
+  shift || true
+  ensure_state_file
+
+  case "$sub" in
+    list)
+      echo "Configured categories:"
+      jq -r '.categories[]' "$STATE_FILE" | while read -r cat; do
+        echo "  • $cat"
+      done
+      ;;
+    add)
+      local name="${1:-}"
+      if [[ -z "$name" ]]; then
+        echo "Usage: omarchy-budget category add <name>"
+        exit 1
+      fi
+      local res
+      res=$(ipc_call addCategory "$name")
+      if [[ "$res" != "ok" ]]; then
+        jq --arg name "$name" '
+          if (.categories | index($name)) == null then .categories += [$name] else . end
+        ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      fi
+      echo "✓ Added category: $name"
+      ;;
+    rename)
+      local old="${1:-}"
+      local new="${2:-}"
+      if [[ -z "$old" || -z "$new" ]]; then
+        echo "Usage: omarchy-budget category rename <old-name> <new-name>"
+        exit 1
+      fi
+      local res
+      res=$(ipc_call renameCategory "$old" "$new")
+      if [[ "$res" != "ok" ]]; then
+        jq --arg old "$old" --arg new "$new" '
+          .categories = [.categories[] | if . == $old then $new else . end] |
+          .expenses = [.expenses[] | if .category == $old then .category = $new else . end]
+        ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      fi
+      echo "✓ Renamed category '$old' to '$new'"
+      ;;
+    delete|remove)
+      local name="${1:-}"
+      if [[ -z "$name" ]]; then
+        echo "Usage: omarchy-budget category delete <name>"
+        exit 1
+      fi
+      local res
+      res=$(ipc_call deleteCategory "$name")
+      if [[ "$res" != "ok" ]]; then
+        jq --arg name "$name" '
+          .categories = [.categories[] | select(. != $name)] |
+          if (.categories | length) == 0 then .categories = ["Other"] else . end |
+          .expenses = [.expenses[] | if .category == $name then .category = "Other" else . end]
+        ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      fi
+      echo "✓ Deleted category '$name' (expenses moved to 'Other')"
+      ;;
+    *)
+      echo "Usage: omarchy-budget category [list|add|rename|delete] ..."
+      ;;
+  esac
+}
+
 # Subcommand dispatch
 action="${1:-toggle}"
 shift || true
@@ -219,14 +290,21 @@ case "$action" in
   list)
     cmd_list
     ;;
+  category|categories)
+    cmd_category "$@"
+    ;;
   *)
     echo "Omarchy Budget & Spending Tracker"
     echo "Usage:"
-    echo "  omarchy-budget                    Toggle popup in status bar"
+    echo "  omarchy-budget                       Toggle popup in status bar"
     echo "  omarchy-budget add <amount> [cat] [note]  Add purchase"
-    echo "  omarchy-budget status             Show terminal overview"
-    echo "  omarchy-budget income <amount>    Set monthly income"
-    echo "  omarchy-budget savings <percent>  Set savings goal percent"
-    echo "  omarchy-budget list               List purchases"
+    echo "  omarchy-budget status                Show terminal overview"
+    echo "  omarchy-budget income <amount>       Set monthly income"
+    echo "  omarchy-budget savings <percent>     Set savings goal percent"
+    echo "  omarchy-budget list                  List purchases"
+    echo "  omarchy-budget categories            List all categories"
+    echo "  omarchy-budget category add <name>   Add category"
+    echo "  omarchy-budget category rename <old> <new>  Rename category"
+    echo "  omarchy-budget category delete <name>       Delete category"
     ;;
 esac

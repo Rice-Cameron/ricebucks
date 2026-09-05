@@ -28,6 +28,10 @@ Panel {
   property var categories: Model.defaultCategories.slice()
   property var expenses: []
 
+  // Category management UI state
+  property bool managingCategories: false
+  property string editingCategory: ""
+
   // Derived calculations
   readonly property string currentMonth: Model.currentMonthKey()
   readonly property var monthlyExpenses: Model.filterExpensesByMonth(expenses, currentMonth)
@@ -83,6 +87,51 @@ Panel {
       expenses: root.expenses
     }
     budgetFile.setText(JSON.stringify(data, null, 2) + "\n")
+  }
+
+  // Category management functions
+  function addCategory(name) {
+    var res = Model.addCategory(categories, name)
+    if (!res.ok) {
+      showFeedback(res.error || "Failed to add category")
+      return false
+    }
+    categories = res.categories
+    persistState()
+    showFeedback("Added category: " + name)
+    return true
+  }
+
+  function renameCategory(oldName, newName) {
+    var res = Model.renameCategory(categories, expenses, oldName, newName)
+    if (!res.ok) {
+      showFeedback(res.error || "Failed to rename category")
+      return false
+    }
+    categories = res.categories
+    expenses = res.expenses
+    if (selectedCategory === oldName) selectedCategory = newName
+    editingCategory = ""
+    persistState()
+    showFeedback("Renamed category to: " + newName)
+    return true
+  }
+
+  function deleteCategory(name) {
+    var res = Model.deleteCategory(categories, expenses, name)
+    if (!res.ok) {
+      showFeedback(res.error || "Failed to delete category")
+      return false
+    }
+    categories = res.categories
+    expenses = res.expenses
+    if (selectedCategory === name) {
+      selectedCategory = categories.length > 0 ? categories[0] : "Other"
+    }
+    editingCategory = ""
+    persistState()
+    showFeedback("Deleted category '" + name + "'" + (res.fallback ? " (assigned expenses to " + res.fallback + ")" : ""))
+    return true
   }
 
   // Submit expense
@@ -189,6 +238,15 @@ Panel {
       var ok = root.updateBudgetSettings(root.income, percent)
       return ok ? "ok" : "invalid"
     }
+    function addCategory(name: string): string {
+      return root.addCategory(name) ? "ok" : "invalid"
+    }
+    function renameCategory(oldName: string, newName: string): string {
+      return root.renameCategory(oldName, newName) ? "ok" : "invalid"
+    }
+    function deleteCategory(name: string): string {
+      return root.deleteCategory(name) ? "ok" : "invalid"
+    }
   }
 
   // Bar icon button
@@ -223,6 +281,7 @@ Panel {
         || incomeInput.activeFocus
         || savingsInput.activeFocus
         || customCatInput.activeFocus
+        || newCategoryInput.activeFocus
       onCloseRequested: root.close()
 
       Flickable {
@@ -523,7 +582,7 @@ Panel {
               }
             }
 
-            // Custom category input row (if selected)
+            // Custom category input row (if selected from dropdown)
             Row {
               visible: root.showNewCategoryInput
               width: parent.width
@@ -542,11 +601,7 @@ Panel {
                 onClicked: {
                   if (customCatInput.text.trim()) {
                     var c = customCatInput.text.trim()
-                    if (root.categories.indexOf(c) === -1) {
-                      var updated = root.categories.slice()
-                      updated.push(c)
-                      root.categories = updated
-                    }
+                    root.addCategory(c)
                     root.selectedCategory = c
                     root.showNewCategoryInput = false
                     customCatInput.text = ""
@@ -594,18 +649,41 @@ Panel {
           PanelSeparator { foreground: root.foreground }
 
           // -----------------------------------------------------------------
-          // 4. CATEGORY RUNNING TOTALS
+          // 4. CATEGORIES: RUNNING TOTALS & EDIT / DELETE / ADD
           // -----------------------------------------------------------------
           Column {
             width: parent.width
             spacing: Style.space(8)
 
-            PanelSectionHeader {
-              text: "CATEGORY RUNNING TOTALS"
-              foreground: root.foreground
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(catHeader.implicitHeight, manageCatBtn.implicitHeight)
+
+              PanelSectionHeader {
+                id: catHeader
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.managingCategories ? "MANAGE CATEGORIES" : "CATEGORY RUNNING TOTALS"
+                foreground: root.foreground
+              }
+
+              Button {
+                id: manageCatBtn
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.managingCategories ? "Done" : "Manage"
+                bordered: true
+                fontSize: Style.font.caption
+                onClicked: {
+                  root.managingCategories = !root.managingCategories
+                  root.editingCategory = ""
+                }
+              }
             }
 
+            // Normal View: Running Totals Breakdown
             Column {
+              visible: !root.managingCategories
               width: parent.width
               spacing: Style.space(8)
 
@@ -660,6 +738,147 @@ Panel {
                       radius: 2
                       color: root.accent
                       visible: modelData.total > 0
+                    }
+                  }
+                }
+              }
+            }
+
+            // Management View: Add, Rename, Delete Categories
+            Column {
+              visible: root.managingCategories
+              width: parent.width
+              spacing: Style.space(8)
+
+              // Add Category Row
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+
+                TextField {
+                  id: newCategoryInput
+                  width: parent.width - addCategoryBtn.width - Style.space(8)
+                  placeholderText: "New category name..."
+                  onAccepted: addCategoryBtn.clicked()
+                }
+
+                Button {
+                  id: addCategoryBtn
+                  width: Style.space(75)
+                  text: "+ Add"
+                  bordered: true
+                  onClicked: {
+                    if (newCategoryInput.text.trim()) {
+                      root.addCategory(newCategoryInput.text.trim())
+                      newCategoryInput.text = ""
+                    }
+                  }
+                }
+              }
+
+              // List of categories to edit / delete
+              Column {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: root.categories
+
+                  BorderSurface {
+                    required property string modelData
+                    width: parent.width
+                    radius: Style.cornerRadius
+                    border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                    border.width: 1
+                    color: Style.controlFill(false, false, root.foreground, root.accent)
+                    padding: Style.space(6)
+
+                    // Display Row (When not editing this item)
+                    Item {
+                      visible: root.editingCategory !== modelData
+                      width: parent.width
+                      implicitHeight: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight)
+
+                      Text {
+                        id: catNameLabel
+                        anchors.left: parent.left
+                        anchors.right: actionBtns.left
+                        anchors.rightMargin: Style.space(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.bodySmall
+                        font.bold: true
+                        elide: Text.ElideRight
+                      }
+
+                      Row {
+                        id: actionBtns
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(4)
+
+                        Button {
+                          text: "Rename"
+                          bordered: false
+                          fontSize: Style.font.caption
+                          onClicked: {
+                            root.editingCategory = modelData
+                            renameInput.text = modelData
+                          }
+                        }
+
+                        Button {
+                          text: "Delete"
+                          bordered: false
+                          fontSize: Style.font.caption
+                          onClicked: root.deleteCategory(modelData)
+                        }
+                      }
+                    }
+
+                    // Edit Row (When editing this item)
+                    Item {
+                      visible: root.editingCategory === modelData
+                      width: parent.width
+                      implicitHeight: Math.max(renameInput.implicitHeight, renameActions.implicitHeight)
+
+                      TextField {
+                        id: renameInput
+                        anchors.left: parent.left
+                        anchors.right: renameActions.left
+                        anchors.rightMargin: Style.space(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData
+                        onAccepted: saveRenameBtn.clicked()
+                      }
+
+                      Row {
+                        id: renameActions
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(4)
+
+                        Button {
+                          id: saveRenameBtn
+                          text: "Save"
+                          bordered: true
+                          fontSize: Style.font.caption
+                          onClicked: {
+                            if (renameInput.text.trim()) {
+                              root.renameCategory(modelData, renameInput.text.trim())
+                            }
+                          }
+                        }
+
+                        Button {
+                          text: "Cancel"
+                          bordered: false
+                          fontSize: Style.font.caption
+                          onClicked: root.editingCategory = ""
+                        }
+                      }
                     }
                   }
                 }

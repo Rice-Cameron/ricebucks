@@ -2,13 +2,14 @@
 
 .pragma library
 
+// General default starter categories for new installations
 var defaultCategories = [
-  "Rent + Utilities",
+  "Housing",
   "Groceries",
-  "Eating Out",
-  "Insurance",
-  "Car Payment",
-  "Random Fun Things",
+  "Dining Out",
+  "Transportation",
+  "Utilities",
+  "Entertainment",
   "Other"
 ];
 
@@ -145,7 +146,7 @@ function categoryTotals(expenses, allCategories) {
     });
   }
 
-  // Sort: non-zero categories first sorted descending by total, then empty categories
+  // Sort: categories with spending first (sorted descending by total), then unused categories
   result.sort(function(a, b) {
     if (a.total > 0 && b.total > 0) return b.total - a.total;
     if (a.total > 0) return -1;
@@ -192,4 +193,89 @@ function createExpense(amount, category, note) {
     note: String(note || "").trim(),
     date: new Date().toISOString()
   };
+}
+
+// Category Management Functions
+function addCategory(categories, name) {
+  if (!Array.isArray(categories)) categories = [];
+  var trimmed = String(name || "").trim();
+  if (!trimmed) return { ok: false, error: "Category name cannot be empty" };
+  for (var i = 0; i < categories.length; i++) {
+    if (categories[i].toLowerCase() === trimmed.toLowerCase()) {
+      return { ok: false, error: "Category already exists" };
+    }
+  }
+  var updated = categories.slice();
+  updated.push(trimmed);
+  return { ok: true, categories: updated };
+}
+
+function renameCategory(categories, expenses, oldName, newName) {
+  if (!Array.isArray(categories)) return { ok: false, error: "Invalid categories" };
+  var from = String(oldName || "").trim();
+  var to = String(newName || "").trim();
+  if (!from || !to) return { ok: false, error: "Names cannot be empty" };
+  if (from === to) return { ok: true, categories: categories, expenses: expenses };
+
+  var fromIdx = -1;
+  for (var i = 0; i < categories.length; i++) {
+    if (categories[i] === from) { fromIdx = i; break; }
+  }
+  if (fromIdx === -1) return { ok: false, error: "Category not found: " + from };
+
+  // Check if newName already exists (case-insensitive)
+  for (var j = 0; j < categories.length; j++) {
+    if (j !== fromIdx && categories[j].toLowerCase() === to.toLowerCase()) {
+      return { ok: false, error: "Category already exists: " + to };
+    }
+  }
+
+  var updatedCats = categories.slice();
+  updatedCats[fromIdx] = to;
+
+  var updatedExps = Array.isArray(expenses) ? expenses.map(function(e) {
+    if (e && e.category === from) {
+      var copy = Object.assign({}, e);
+      copy.category = to;
+      return copy;
+    }
+    return e;
+  }) : [];
+
+  return { ok: true, categories: updatedCats, expenses: updatedExps };
+}
+
+function deleteCategory(categories, expenses, name) {
+  if (!Array.isArray(categories)) return { ok: false, error: "Invalid categories" };
+  var target = String(name || "").trim();
+  if (!target) return { ok: false, error: "Category name cannot be empty" };
+
+  var targetIdx = categories.indexOf(target);
+  if (targetIdx === -1) return { ok: false, error: "Category not found: " + target };
+
+  if (categories.length <= 1) {
+    return { ok: false, error: "Cannot delete the only remaining category" };
+  }
+
+  var fallback = "Other";
+  var updatedCats = categories.filter(function(c) { return c !== target; });
+
+  // If we deleted something other than "Other", make sure "Other" exists as a fallback
+  if (target !== fallback && updatedCats.indexOf(fallback) === -1) {
+    updatedCats.push(fallback);
+  } else if (target === fallback) {
+    fallback = updatedCats[0];
+  }
+
+  // Reassign affected expenses
+  var updatedExps = Array.isArray(expenses) ? expenses.map(function(e) {
+    if (e && e.category === target) {
+      var copy = Object.assign({}, e);
+      copy.category = fallback;
+      return copy;
+    }
+    return e;
+  }) : [];
+
+  return { ok: true, categories: updatedCats, expenses: updatedExps, fallback: fallback };
 }
