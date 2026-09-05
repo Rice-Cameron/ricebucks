@@ -68,8 +68,14 @@ Panel {
     onTriggered: root.clearFeedback()
   }
 
+  property bool stateLoaded: false
+
   // Load state from JSON
   function loadState(raw) {
+    if (!raw || raw.trim() === "") {
+      stateLoaded = true
+      return
+    }
     var s = Model.parseState(raw)
     budgetState = s
     income = s.income || 0
@@ -79,10 +85,12 @@ Panel {
     if (categories.indexOf(selectedCategory) === -1 && categories.length > 0) {
       selectedCategory = categories[0]
     }
+    stateLoaded = true
   }
 
   // Persist state to disk
   function persistState() {
+    if (!stateLoaded) return
     var data = {
       version: 1,
       income: root.income,
