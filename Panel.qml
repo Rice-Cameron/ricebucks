@@ -31,6 +31,10 @@ Panel {
   // Category management UI state
   property bool managingCategories: false
   property string editingCategory: ""
+  property int dragActiveIndex: -1
+  property int dragTargetIndex: -1
+  property real dragStartY: 0
+  property real dragCurrentY: 0
 
   // Derived calculations
   readonly property string currentMonth: Model.currentMonthKey()
@@ -132,6 +136,16 @@ Panel {
     persistState()
     showFeedback("Deleted category '" + name + "'" + (res.fallback ? " (assigned expenses to " + res.fallback + ")" : ""))
     return true
+  }
+
+  function moveCategory(fromIndex, toIndex) {
+    var updated = Model.moveCategory(categories, fromIndex, toIndex)
+    if (updated !== categories) {
+      categories = updated
+      persistState()
+      return true
+    }
+    return false
   }
 
   // Submit expense
@@ -247,6 +261,9 @@ Panel {
     function deleteCategory(name: string): string {
       return root.deleteCategory(name) ? "ok" : "invalid"
     }
+    function moveCategory(fromIndex: int, toIndex: int): string {
+      return root.moveCategory(fromIndex, toIndex) ? "ok" : "invalid"
+    }
   }
 
   // Bar icon button
@@ -283,6 +300,7 @@ Panel {
         || customCatInput.activeFocus
         || newCategoryInput.activeFocus
         || root.editingCategory !== ""
+        || root.dragActiveIndex !== -1
       onCloseRequested: root.close()
 
       Flickable {
@@ -701,7 +719,7 @@ Panel {
                 id: catHeader
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.managingCategories ? "MANAGE CATEGORIES" : "CATEGORY RUNNING TOTALS"
+                text: root.managingCategories ? "MANAGE CATEGORIES (drag ⠿ to reorder)" : "CATEGORY RUNNING TOTALS"
                 foreground: root.foreground
               }
 
@@ -829,125 +847,233 @@ Panel {
               }
 
               Column {
+                id: categoryListCol
                 width: parent.width
                 spacing: Style.space(6)
 
                 Repeater {
                   model: root.categories
 
-                  BorderSurface {
-                    id: catSurface
+                  Item {
+                    id: slotItem
+                    required property int index
                     required property string modelData
                     width: parent.width
-                    implicitHeight: (root.editingCategory === modelData ? editCardItem.height : displayCardItem.height) + Style.space(16)
-                    height: implicitHeight
-                    radius: Style.cornerRadius
-                    border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
-                    border.width: 1
-                    color: Style.controlFill(false, false, root.foreground, root.accent)
+                    height: catSurface.height
+                    z: catSurface.isDragged ? 100 : 1
 
-                    // Display Row (When not editing this item)
-                    Item {
-                      id: displayCardItem
-                      visible: root.editingCategory !== modelData
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.verticalCenter: parent.verticalCenter
-                      anchors.leftMargin: Style.space(10)
-                      anchors.rightMargin: Style.space(10)
-                      height: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight, Style.space(26))
-
-                      Text {
-                        id: catNameLabel
-                        anchors.left: parent.left
-                        anchors.right: actionBtns.left
-                        anchors.rightMargin: Style.space(8)
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: true
-                        elide: Text.ElideRight
-                      }
-
-                      Row {
-                        id: actionBtns
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(6)
-
-                        Button {
-                          text: "Rename"
-                          bordered: true
-                          fontSize: Style.font.caption
-                          verticalPadding: Style.space(4)
-                          horizontalPadding: Style.space(8)
-                          onClicked: {
-                            renameInput.text = modelData
-                            root.editingCategory = modelData
-                          }
+                    readonly property real slotHeight: height + categoryListCol.spacing
+                    readonly property real shiftOffset: {
+                      if (root.dragActiveIndex === -1 || root.dragActiveIndex === root.dragTargetIndex) return 0;
+                      if (root.dragActiveIndex < root.dragTargetIndex) {
+                        if (index > root.dragActiveIndex && index <= root.dragTargetIndex) {
+                          return -slotHeight;
                         }
-
-                        Button {
-                          text: "Delete"
-                          bordered: true
-                          fontSize: Style.font.caption
-                          verticalPadding: Style.space(4)
-                          horizontalPadding: Style.space(8)
-                          onClicked: root.deleteCategory(modelData)
+                      } else if (root.dragActiveIndex > root.dragTargetIndex) {
+                        if (index >= root.dragTargetIndex && index < root.dragActiveIndex) {
+                          return slotHeight;
                         }
                       }
+                      return 0;
                     }
 
-                    // Edit Row (When editing this item)
-                    Item {
-                      id: editCardItem
-                      visible: root.editingCategory === modelData
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.verticalCenter: parent.verticalCenter
-                      anchors.leftMargin: Style.space(10)
-                      anchors.rightMargin: Style.space(10)
-                      height: Math.max(renameInput.implicitHeight, renameActions.implicitHeight, Style.space(30))
+                    BorderSurface {
+                      id: catSurface
+                      readonly property bool isDragged: root.dragActiveIndex === slotItem.index
+                      width: parent.width
+                      implicitHeight: (root.editingCategory === slotItem.modelData ? editCardItem.height : displayCardItem.height) + Style.space(16)
+                      height: implicitHeight
+                      radius: Style.cornerRadius
+                      border.color: isDragged ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                      border.width: isDragged ? 2 : 1
+                      color: isDragged
+                        ? Style.selectedFillFor(root.foreground, root.accent)
+                        : Style.controlFill(false, false, root.foreground, root.accent)
+                      opacity: isDragged ? 0.95 : 1.0
 
-                      TextField {
-                        id: renameInput
-                        anchors.left: parent.left
-                        anchors.right: renameActions.left
-                        anchors.rightMargin: Style.space(8)
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData
-                        onAccepted: saveRenameBtn.clicked()
+                      y: isDragged ? (root.dragCurrentY - root.dragStartY) : slotItem.shiftOffset
+
+                      Behavior on y {
+                        enabled: !catSurface.isDragged
+                        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
                       }
 
-                      Row {
-                        id: renameActions
+                      // Display Row (When not editing this item)
+                      Item {
+                        id: displayCardItem
+                        visible: root.editingCategory !== slotItem.modelData
+                        anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(6)
+                        anchors.leftMargin: Style.space(8)
+                        anchors.rightMargin: Style.space(10)
+                        height: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight, Style.space(26))
 
-                        Button {
-                          id: saveRenameBtn
-                          text: "Save"
-                          bordered: true
-                          fontSize: Style.font.caption
-                          verticalPadding: Style.space(4)
-                          horizontalPadding: Style.space(8)
-                          onClicked: {
-                            if (renameInput.text.trim()) {
-                              root.renameCategory(modelData, renameInput.text.trim())
+                        // Drag handle grip
+                        Item {
+                          id: dragHandle
+                          width: Style.space(24)
+                          height: parent.height
+                          anchors.left: parent.left
+                          anchors.verticalCenter: parent.verticalCenter
+
+                          Grid {
+                            anchors.centerIn: parent
+                            columns: 2
+                            spacing: Style.space(3)
+                            opacity: dragHandleArea.containsMouse || catSurface.isDragged ? 1.0 : 0.45
+
+                            Repeater {
+                              model: 6
+                              Rectangle {
+                                width: Style.space(3)
+                                height: Style.space(3)
+                                radius: width / 2
+                                color: dragHandleArea.containsMouse || catSurface.isDragged ? root.accent : root.foreground
+                              }
+                            }
+                          }
+
+                          MouseArea {
+                            id: dragHandleArea
+                            anchors.fill: parent
+                            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                            hoverEnabled: true
+                            preventStealing: true
+
+                            onPressed: function(mouse) {
+                              root.dragActiveIndex = slotItem.index
+                              root.dragTargetIndex = slotItem.index
+                              var pt = dragHandleArea.mapToItem(null, mouse.x, mouse.y)
+                              root.dragStartY = pt.y
+                              root.dragCurrentY = pt.y
+                            }
+
+                            onPositionChanged: function(mouse) {
+                              if (root.dragActiveIndex === slotItem.index) {
+                                var pt = dragHandleArea.mapToItem(null, mouse.x, mouse.y)
+                                root.dragCurrentY = pt.y
+
+                                var deltaY = root.dragCurrentY - root.dragStartY
+                                var slotH = slotItem.slotHeight
+                                var slots = Math.round(deltaY / slotH)
+                                var target = Math.max(0, Math.min(root.categories.length - 1, root.dragActiveIndex + slots))
+                                root.dragTargetIndex = target
+                              }
+                            }
+
+                            onReleased: function(mouse) {
+                              if (root.dragActiveIndex === slotItem.index) {
+                                var from = root.dragActiveIndex
+                                var to = root.dragTargetIndex
+                                root.dragActiveIndex = -1
+                                root.dragTargetIndex = -1
+                                if (to >= 0 && to !== from) {
+                                  root.moveCategory(from, to)
+                                }
+                              }
+                            }
+
+                            onCanceled: {
+                              root.dragActiveIndex = -1
+                              root.dragTargetIndex = -1
                             }
                           }
                         }
 
-                        Button {
-                          text: "Cancel"
-                          bordered: true
-                          fontSize: Style.font.caption
-                          verticalPadding: Style.space(4)
-                          horizontalPadding: Style.space(8)
-                          onClicked: root.editingCategory = ""
+                        Text {
+                          id: catNameLabel
+                          anchors.left: dragHandle.right
+                          anchors.right: actionBtns.left
+                          anchors.leftMargin: Style.space(6)
+                          anchors.rightMargin: Style.space(8)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: slotItem.modelData
+                          color: root.foreground
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.bodySmall
+                          font.bold: true
+                          elide: Text.ElideRight
+                        }
+
+                        Row {
+                          id: actionBtns
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          spacing: Style.space(6)
+
+                          Button {
+                            text: "Rename"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: {
+                              renameInput.text = slotItem.modelData
+                              root.editingCategory = slotItem.modelData
+                            }
+                          }
+
+                          Button {
+                            text: "Delete"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: root.deleteCategory(slotItem.modelData)
+                          }
+                        }
+                      }
+
+                      // Edit Row (When editing this item)
+                      Item {
+                        id: editCardItem
+                        visible: root.editingCategory === slotItem.modelData
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(10)
+                        height: Math.max(renameInput.implicitHeight, renameActions.implicitHeight, Style.space(30))
+
+                        TextField {
+                          id: renameInput
+                          anchors.left: parent.left
+                          anchors.right: renameActions.left
+                          anchors.rightMargin: Style.space(8)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: slotItem.modelData
+                          onAccepted: saveRenameBtn.clicked()
+                        }
+
+                        Row {
+                          id: renameActions
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          spacing: Style.space(6)
+
+                          Button {
+                            id: saveRenameBtn
+                            text: "Save"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: {
+                              if (renameInput.text.trim()) {
+                                root.renameCategory(slotItem.modelData, renameInput.text.trim())
+                              }
+                            }
+                          }
+
+                          Button {
+                            text: "Cancel"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: root.editingCategory = ""
+                          }
                         }
                       }
                     }
@@ -976,8 +1102,10 @@ Panel {
               spacing: Style.space(8)
 
               Column {
+                id: incomeCol
                 spacing: Style.space(2)
                 Text {
+                  id: incomeLabel
                   text: "Monthly Income ($)"
                   color: root.dim
                   font.family: root.fontFamily
@@ -993,8 +1121,10 @@ Panel {
               }
 
               Column {
+                id: savingsCol
                 spacing: Style.space(2)
                 Text {
+                  id: savingsLabel
                   text: "Save Target (%)"
                   color: root.dim
                   font.family: root.fontFamily
@@ -1011,8 +1141,15 @@ Panel {
 
               Column {
                 spacing: Style.space(2)
-                Item { width: 1; height: Style.font.caption } // align with inputs
+
+                Item {
+                  width: 1
+                  height: incomeLabel.implicitHeight
+                }
+
                 Button {
+                  id: saveBudgetBtn
+                  height: incomeInput.height
                   text: "Save Budget"
                   bordered: true
                   onClicked: {

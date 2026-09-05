@@ -279,3 +279,14 @@ function deleteCategory(categories, expenses, name) {
 
   return { ok: true, categories: updatedCats, expenses: updatedExps, fallback: fallback };
 }
+
+function moveCategory(categories, fromIndex, toIndex) {
+  if (!Array.isArray(categories)) return categories;
+  var from = Math.max(0, Math.min(categories.length - 1, fromIndex));
+  var to = Math.max(0, Math.min(categories.length - 1, toIndex));
+  if (from === to) return categories;
+  var updated = categories.slice();
+  var item = updated.splice(from, 1)[0];
+  updated.splice(to, 0, item);
+  return updated;
+}

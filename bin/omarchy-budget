@@ -261,8 +261,29 @@ cmd_category() {
       fi
       echo "✓ Deleted category '$name' (expenses moved to 'Other')"
       ;;
+    move|reorder)
+      local from="${1:-}"
+      local to="${2:-}"
+      if [[ -z "$from" || -z "$to" ]]; then
+        echo "Usage: omarchy-budget category move <from-index> <to-index>"
+        exit 1
+      fi
+      local res
+      res=$(ipc_call moveCategory "$from" "$to")
+      if [[ "$res" != "ok" ]]; then
+        jq --argjson from "$from" --argjson to "$to" '
+          .categories as $cats |
+          if $from >= 0 and $from < ($cats | length) and $to >= 0 and $to < ($cats | length) then
+            ($cats[$from]) as $item |
+            ([$cats[:$from], $cats[$from+1:]] | flatten) as $rest |
+            .categories = ([$rest[:$to], [$item], $rest[$to:]] | flatten)
+          else . end
+        ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      fi
+      echo "✓ Reordered category from index $from to $to"
+      ;;
     *)
-      echo "Usage: omarchy-budget category [list|add|rename|delete] ..."
+      echo "Usage: omarchy-budget category [list|add|rename|delete|move] ..."
       ;;
   esac
 }
@@ -273,10 +294,10 @@ shift || true
 
 case "$action" in
   toggle|open|show)
-    cmd_toggle
+    ipc_toggle
     ;;
-  add)
-    cmd_add "$@"
+  status|overview)
+    cmd_status
     ;;
   income)
     cmd_income "$@"
@@ -284,8 +305,8 @@ case "$action" in
   savings|save)
     cmd_savings "$@"
     ;;
-  status|summary)
-    cmd_status
+  add|expense|spend)
+    cmd_add "$@"
     ;;
   list)
     cmd_list
@@ -306,5 +327,6 @@ case "$action" in
     echo "  omarchy-budget category add <name>   Add category"
     echo "  omarchy-budget category rename <old> <new>  Rename category"
     echo "  omarchy-budget category delete <name>       Delete category"
+    echo "  omarchy-budget category move <from> <to>    Reorder category"
     ;;
 esac
