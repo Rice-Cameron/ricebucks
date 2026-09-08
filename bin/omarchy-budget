@@ -40,6 +40,7 @@ ensure_state_file() {
     "Entertainment",
     "Other"
   ],
+  "categoryLimits": {},
   "expenses": []
 }
 JSON
@@ -48,6 +49,56 @@ JSON
 
 cmd_toggle() {
   omarchy-shell shell toggle cameronri.budget >/dev/null 2>&1 || true
+}
+
+cmd_limit() {
+  local category="${1:-}"
+  local amount="${2:-}"
+
+  if [[ -z "$category" ]]; then
+    echo "Usage: omarchy-budget limit <category> [amount]"
+    echo "Example: omarchy-budget limit \"Groceries\" 500"
+    echo "         omarchy-budget limit \"Groceries\" clear"
+    exit 1
+  fi
+
+  if [[ -z "$amount" ]]; then
+    ensure_state_file
+    local cur_lim
+    cur_lim=$(jq -r --arg cat "$category" '(.categoryLimits // {})[$cat] // empty' "$STATE_FILE")
+    if [[ -n "$cur_lim" && "$cur_lim" != "null" ]]; then
+      printf "Spending limit for '%s': \$%'.2f\n" "$category" "$cur_lim"
+    else
+      echo "No spending limit set for '$category'."
+    fi
+    return 0
+  fi
+
+  if [[ "$amount" == "clear" || "$amount" == "none" || "$amount" == "remove" || "$amount" == "0" ]]; then
+    local res
+    res=$(ipc_call setLimit "$category" "0")
+    if [[ "$res" != "ok" ]]; then
+      ensure_state_file
+      jq --arg cat "$category" '
+        .categoryLimits = (.categoryLimits // {}) |
+        del(.categoryLimits[$cat])
+      ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+    fi
+    echo "✓ Removed spending limit for '$category'"
+    return 0
+  fi
+
+  local res
+  res=$(ipc_call setLimit "$category" "$amount")
+  if [[ "$res" != "ok" ]]; then
+    ensure_state_file
+    jq --arg cat "$category" --arg amt "$amount" '
+      .categoryLimits = (.categoryLimits // {}) |
+      .categoryLimits[$cat] = ($amt | tonumber) |
+      if (.categories | index($cat)) == null then .categories += [$cat] else . end
+    ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  fi
+  echo "✓ Spending limit for '$category' set to \$$amount"
 }
 
 cmd_add() {
@@ -64,24 +115,49 @@ cmd_add() {
   # Call via IPC if running
   local res
   res=$(ipc_call add "$amount" "$category" "$note")
-  if [[ "$res" == "ok" ]]; then
-    echo "✓ Added \$$amount to '$category' ($note)"
-    return 0
+  if [[ "$res" != "ok" ]]; then
+    # Fallback: direct JSON modification
+    ensure_state_file
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    local id
+    id="$(date +%s)-$RANDOM"
+
+    jq --arg amt "$amount" --arg cat "$category" --arg note "$note" --arg date "$now" --arg id "$id" '
+      .expenses = [{id: $id, amount: ($amt | tonumber), category: $cat, note: $note, date: $date}] + .expenses |
+      if (.categories | index($cat)) == null then .categories += [$cat] else . end
+    ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
   fi
 
-  # Fallback: direct JSON modification
-  ensure_state_file
-  local now
-  now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-  local id
-  id="$(date +%s)-$RANDOM"
-
-  jq --arg amt "$amount" --arg cat "$category" --arg note "$note" --arg date "$now" --arg id "$id" '
-    .expenses = [{id: $id, amount: ($amt | tonumber), category: $cat, note: $note, date: $date}] + .expenses |
-    if (.categories | index($cat)) == null then .categories += [$cat] else . end
-  ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
-
   echo "✓ Added \$$amount to '$category' ($note)"
+
+  # Check category spending limit
+  ensure_state_file
+  local cur_month
+  cur_month=$(date +"%Y-%m")
+  local check_res
+  check_res=$(jq -r --arg month "$cur_month" --arg cat "$category" '
+    def sum_by_cat: [.expenses[] | select(.date | startswith($month)) | select(.category == $cat) | .amount] | add // 0;
+    ((.categoryLimits // {})[$cat] // 0) as $lim |
+    sum_by_cat as $tot |
+    if $lim > 0 then
+      if $tot > $lim then
+        "OVER\t" + ($tot | tostring) + "\t" + ($lim | tostring) + "\t" + (($tot - $lim) | tostring)
+      else
+        "OK\t" + ($tot | tostring) + "\t" + ($lim | tostring) + "\t" + (($lim - $tot) | tostring)
+      end
+    else
+      "NONE"
+    end
+  ' "$STATE_FILE")
+
+  local status tot lim diff
+  IFS=$'\t' read -r status tot lim diff <<< "$check_res"
+  if [[ "$status" == "OVER" ]]; then
+    printf "\033[1;31m⚠ Warning: '%s' spending (\$%'.2f) has exceeded its \$%'.2f limit by \$%'.2f!\033[0m\n" "$category" "$tot" "$lim" "$diff"
+  elif [[ "$status" == "OK" ]]; then
+    printf "  ('%s' remaining: \$%'.2f of \$%'.2f limit)\n" "$category" "$diff" "$lim"
+  fi
 }
 
 cmd_income() {
@@ -136,9 +212,13 @@ cmd_status() {
       remaining: ((.income // 0) - ((.income // 0) * ((.savingsPercent // 20) / 100)) - total_spent),
       categories: [
         .categories[] as $cat |
+        ((.categoryLimits // {})[$cat] // 0) as $lim |
+        sum_by_cat($cat) as $tot |
         {
           name: $cat,
-          total: sum_by_cat($cat),
+          total: $tot,
+          limit: $lim,
+          isOver: (if $lim > 0 and $tot > $lim then true else false end),
           count: ([.expenses[] | select(.date | startswith($month)) | select(.category == $cat)] | length)
         }
       ] | sort_by(-.total)
@@ -168,15 +248,33 @@ cmd_status() {
   echo "  CATEGORY RUNNING TOTALS:"
   echo "$data" | jq -r --argjson total "$total_spent" '
     .categories[] | 
-    select(.total > 0 or .count > 0) |
+    select(.total > 0 or .count > 0 or .limit > 0) |
     [
       .name,
       (.total | tostring),
-      (if $total > 0 then ((.total / $total * 100 * 10 | round) / 10 | tostring) + "%" else "0%" end),
+      (.limit | tostring),
+      (if .limit > 0 then
+        if .isOver then
+          "OVER:" + ((.total - .limit) | tostring)
+        else
+          "UNDER:" + ((.limit - .total) | tostring)
+        end
+      else
+        "NOLIMIT:" + (if $total > 0 then ((.total / $total * 100 * 10 | round) / 10 | tostring) + "%" else "0%" end)
+      end),
       (.count | tostring)
     ] | @tsv
-  ' | while IFS=$'\t' read -r name tot pct count; do
-    printf "    %-22s \$%8.2f  (%6s)  [%s tx]\n" "$name" "$tot" "$pct" "$count"
+  ' | while IFS=$'\t' read -r name tot lim info count; do
+    if [[ "$info" =~ ^OVER:(.*) ]]; then
+      local over_amt="${BASH_REMATCH[1]}"
+      printf "    %-20s \$%8.2f / \$%-8.2f \033[1;31m(OVER LIMIT by \$%'.2f!)\033[0m  [%s tx]\n" "$name" "$tot" "$lim" "$over_amt" "$count"
+    elif [[ "$info" =~ ^UNDER:(.*) ]]; then
+      local left_amt="${BASH_REMATCH[1]}"
+      printf "    %-20s \$%8.2f / \$%-8.2f (%'7.2f left)              [%s tx]\n" "$name" "$tot" "$lim" "$left_amt" "$count"
+    else
+      local pct="${info#NOLIMIT:}"
+      printf "    %-20s \$%8.2f  (%6s)                              [%s tx]\n" "$name" "$tot" "$pct" "$count"
+    fi
   done
   echo "=========================================================="
 }
@@ -208,9 +306,21 @@ cmd_category() {
   case "$sub" in
     list)
       echo "Configured categories:"
-      jq -r '.categories[]' "$STATE_FILE" | while read -r cat; do
-        echo "  • $cat"
+      jq -r '
+        ((.categoryLimits // {}) as $limits |
+        .categories[] |
+        [., ($limits[.] // empty)] |
+        @tsv)
+      ' "$STATE_FILE" | while IFS=$'\t' read -r cat lim; do
+        if [[ -n "$lim" ]]; then
+          printf "  • %-20s (Limit: \$%'.2f)\n" "$cat" "$lim"
+        else
+          echo "  • $cat"
+        fi
       done
+      ;;
+    limit|set-limit)
+      cmd_limit "$@"
       ;;
     add)
       local name="${1:-}"
@@ -239,7 +349,11 @@ cmd_category() {
       if [[ "$res" != "ok" ]]; then
         jq --arg old "$old" --arg new "$new" '
           .categories = [.categories[] | if . == $old then $new else . end] |
-          .expenses = [.expenses[] | if .category == $old then .category = $new else . end]
+          .expenses = [.expenses[] | if .category == $old then .category = $new else . end] |
+          .categoryLimits = (.categoryLimits // {}) |
+          if .categoryLimits[$old] != null then
+            .categoryLimits[$new] = .categoryLimits[$old] | del(.categoryLimits[$old])
+          else . end
         ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
       fi
       echo "✓ Renamed category '$old' to '$new'"
@@ -256,7 +370,8 @@ cmd_category() {
         jq --arg name "$name" '
           .categories = [.categories[] | select(. != $name)] |
           if (.categories | length) == 0 then .categories = ["Other"] else . end |
-          .expenses = [.expenses[] | if .category == $name then .category = "Other" else . end]
+          .expenses = [.expenses[] | if .category == $name then .category = "Other" else . end] |
+          .categoryLimits = (.categoryLimits // {}) | del(.categoryLimits[$name])
         ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
       fi
       echo "✓ Deleted category '$name' (expenses moved to 'Other')"
@@ -283,7 +398,7 @@ cmd_category() {
       echo "✓ Reordered category from index $from to $to"
       ;;
     *)
-      echo "Usage: omarchy-budget category [list|add|rename|delete|move] ..."
+      echo "Usage: omarchy-budget category [list|add|rename|delete|move|limit] ..."
       ;;
   esac
 }
@@ -305,6 +420,9 @@ case "$action" in
   savings|save)
     cmd_savings "$@"
     ;;
+  limit)
+    cmd_limit "$@"
+    ;;
   add|expense|spend)
     cmd_add "$@"
     ;;
@@ -320,6 +438,7 @@ case "$action" in
     echo "  omarchy-budget                       Toggle popup in status bar"
     echo "  omarchy-budget add <amount> [cat] [note]  Add purchase"
     echo "  omarchy-budget status                Show terminal overview"
+    echo "  omarchy-budget limit <cat> [amount]  Set/view category spending limit"
     echo "  omarchy-budget income <amount>       Set monthly income"
     echo "  omarchy-budget savings <percent>     Set savings goal percent"
     echo "  omarchy-budget list                  List purchases"
@@ -328,5 +447,6 @@ case "$action" in
     echo "  omarchy-budget category rename <old> <new>  Rename category"
     echo "  omarchy-budget category delete <name>       Delete category"
     echo "  omarchy-budget category move <from> <to>    Reorder category"
+    echo "  omarchy-budget category limit <cat> <amount> Set category limit"
     ;;
 esac

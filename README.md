@@ -9,8 +9,9 @@ A native [Omarchy](https://omarchy.org/) shell plugin for personal spending, mon
 - **Bar Widget**: Displays a `$` icon in the Omarchy bar with tooltip balances and over-budget alerts.
 - **Monthly Income & Savings Target**: Set your monthly income and savings percent (e.g. 20%) to dynamically calculate dollar savings reserved.
 - **Remaining Budget Tracker**: Automatically calculates $\text{Income} - \text{Savings Target} - \text{Spending}$.
+- **Category Spending Limits & Warnings**: Set custom spending caps for each category (e.g. $500 for Groceries) to track remaining allowances at a glance. Visual meters fill toward the limit and turn red with explicit warning alerts when exceeded.
 - **Category Management**: Full support to add, rename, delete, and drag-to-reorder categories directly from the desktop popup or the CLI.
-- **Running Totals**: See spending totals per category, percentage share of total monthly expenses, and visual proportion meters.
+- **Running Totals**: See spending totals per category, remaining allowances against limits, percentage share of total monthly expenses, and visual proportion meters.
 - **Transaction History**: View recent purchases and delete mistaken entries.
 - **CLI Companion**: Full command-line companion script `omarchy-budget`.
 
@@ -61,7 +62,7 @@ rm -f ~/.local/state/omarchy/budget.json
 ### Hotkey & Desktop
 - **Super + B**: Toggle the budget panel popup.
 - **Omarchy Menu**: Search `budget` or `spending` from <kbd>Super</kbd> + <kbd>Space</kbd>.
-- **Manage Categories**: Click the **Manage** button in the popup to add new categories, rename existing ones, delete categories (expenses are moved to "Other"), or grab the handle on any category card to smoothly drag and reorder.
+- **Manage Categories & Limits**: Click the **Manage** button in the popup to add new categories, rename existing ones, delete categories (expenses are moved to "Other"), grab the handle on any category card to smoothly drag and reorder, or click **Limit** on any category card to set or clear its spending cap.
 
 ### CLI Commands
 ```bash
@@ -71,15 +72,21 @@ omarchy-budget
 # View terminal budget summary
 omarchy-budget status
 
-# Add a purchase
+# Add a purchase (warns if purchase exceeds category limit)
 omarchy-budget add 45.50 "Groceries" "Trader Joe's"
+
+# Category spending limits
+omarchy-budget limit "Groceries" 500          # Set $500 monthly limit for Groceries
+omarchy-budget limit "Groceries"              # View current limit for Groceries
+omarchy-budget limit "Groceries" clear        # Remove limit for Groceries
+omarchy-budget category limit "Dining" 200    # Alias syntax under category subcommand
 
 # Set income or savings goal
 omarchy-budget income 4000
 omarchy-budget savings 20
 
 # Category management
-omarchy-budget categories                     # List all categories
+omarchy-budget categories                     # List all categories (with limits)
 omarchy-budget category add "Subscriptions"   # Add new category
 omarchy-budget category rename "Old" "New"    # Rename category
 omarchy-budget category delete "Category"     # Delete category
