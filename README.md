@@ -67,8 +67,8 @@ rm -f ~/.local/state/omarchy/budget.json
 ### Understanding Category Progress Meters
 
 The progress meters in the Category Running Totals view adapt automatically:
-- **Categories with a spending limit**: The bar tracks your **budget allowance consumed** ($\text{Spent} / \text{Limit}$). It displays `$Spent / $Limit ($Remaining left)` in your accent theme color, and turns urgent red with an `OVER LIMIT` badge when exceeded.
-- **Categories without a spending limit**: For expected fixed expenses (such as Rent & Bills) that you don't cap, the bar displays that category's **proportional share of total monthly expenses** ($\text{Category Spent} / \text{Total Spent}$). This lets you see where the bulk of your monthly cash flow went at a glance.
+- **Categories with a spending limit**: The bar tracks your **budget allowance consumed** ($\text{Spent} / \text{Limit}$). It displays `$Spent / $Limit ($Remaining left)` filled in your theme's vibrant accent color, and turns urgent red with an `OVER LIMIT` badge when exceeded.
+- **Categories without a spending limit**: For expected fixed expenses (such as Rent & Bills) that you don't cap, it displays `$Spent (XX.X% of spending)`. The progress meter is rendered in a subtle, muted tone to represent its **proportional share of total monthly expenses** ($\text{Category Spent} / \text{Total Spent}$), reserving bright accent and urgent colors exclusively for active budget caps.
 
 ### CLI Commands
 ```bash
