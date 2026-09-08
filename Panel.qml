@@ -858,7 +858,7 @@ Panel {
                             return Model.formatMoney(modelData.total) + " / " + Model.formatMoney(modelData.limit) + " (" + Model.formatMoney(modelData.remaining) + " left)"
                           }
                         } else {
-                          return Model.formatMoney(modelData.total) + (modelData.total > 0 && root.totalSpent > 0 ? " (" + modelData.percent + "%)" : "")
+                          return Model.formatMoney(modelData.total) + (modelData.total > 0 && root.totalSpent > 0 ? " (" + modelData.percent + "% of spending)" : "")
                         }
                       }
                       color: modelData.isOverLimit ? root.urgent : (modelData.total > 0 ? root.foreground : root.dim)
@@ -887,7 +887,13 @@ Panel {
                         }
                       }
                       radius: 2
-                      color: modelData.isOverLimit ? root.urgent : root.accent
+                      color: {
+                        if (modelData.limit > 0) {
+                          return modelData.isOverLimit ? root.urgent : root.accent
+                        } else {
+                          return Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
+                        }
+                      }
                       visible: modelData.total > 0 || modelData.limit > 0
                     }
                   }

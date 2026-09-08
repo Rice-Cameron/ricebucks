@@ -273,7 +273,7 @@ cmd_status() {
       printf "    %-20s \$%8.2f / \$%-8.2f (%'7.2f left)              [%s tx]\n" "$name" "$tot" "$lim" "$left_amt" "$count"
     else
       local pct="${info#NOLIMIT:}"
-      printf "    %-20s \$%8.2f  (%6s)                              [%s tx]\n" "$name" "$tot" "$pct" "$count"
+      printf "    %-20s \$%8.2f  (%6s of spending)          [%s tx]\n" "$name" "$tot" "$pct" "$count"
     fi
   done
   echo "=========================================================="
