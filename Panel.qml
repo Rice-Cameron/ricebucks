@@ -26,11 +26,13 @@ Panel {
   property real income: 0
   property real savingsPercent: 20
   property var categories: Model.defaultCategories.slice()
+  property var categoryLimits: ({})
   property var expenses: []
 
   // Category management UI state
   property bool managingCategories: false
   property string editingCategory: ""
+  property string editingLimitCategory: ""
   property int dragActiveIndex: -1
   property int dragTargetIndex: -1
   property real dragStartY: 0
@@ -42,7 +44,7 @@ Panel {
   readonly property real savingsTarget: Model.savingsAmount(income, savingsPercent)
   readonly property real remaining: Model.remainingBudget(income, savingsPercent, monthlyExpenses)
   readonly property bool isOverBudget: income > 0 && remaining < 0
-  readonly property var categoryData: Model.categoryTotals(monthlyExpenses, categories)
+  readonly property var categoryData: Model.categoryTotals(monthlyExpenses, categories, categoryLimits)
 
   // Feedback message
   property string feedbackText: ""
@@ -80,6 +82,7 @@ Panel {
     income = s.income || 0
     savingsPercent = s.savingsPercent !== undefined ? s.savingsPercent : 20
     categories = (s.categories && s.categories.length > 0) ? s.categories : Model.defaultCategories.slice()
+    categoryLimits = (s.categoryLimits && typeof s.categoryLimits === "object") ? s.categoryLimits : {}
     expenses = Array.isArray(s.expenses) ? s.expenses : []
     if (categories.indexOf(selectedCategory) === -1 && categories.length > 0) {
       selectedCategory = categories[0]
@@ -95,6 +98,7 @@ Panel {
       income: root.income,
       savingsPercent: root.savingsPercent,
       categories: root.categories,
+      categoryLimits: root.categoryLimits,
       expenses: root.expenses
     }
     budgetFile.setText(JSON.stringify(data, null, 2) + "\n")
@@ -113,33 +117,53 @@ Panel {
     return true
   }
 
+  function setCategoryLimit(name, limit) {
+    var res = Model.setCategoryLimit(categoryLimits, name, limit)
+    if (!res.ok) {
+      showFeedback(res.error || "Failed to set category limit")
+      return false
+    }
+    categoryLimits = Object.assign({}, res.categoryLimits)
+    persistState()
+    if (res.removed) {
+      showFeedback("Removed spending limit for " + name)
+    } else {
+      showFeedback("Set " + name + " limit to " + Model.formatMoney(res.limit))
+    }
+    return true
+  }
+
   function renameCategory(oldName, newName) {
-    var res = Model.renameCategory(categories, expenses, oldName, newName)
+    var res = Model.renameCategory(categories, expenses, oldName, newName, categoryLimits)
     if (!res.ok) {
       showFeedback(res.error || "Failed to rename category")
       return false
     }
     categories = res.categories
     expenses = res.expenses
+    categoryLimits = Object.assign({}, res.categoryLimits)
     if (selectedCategory === oldName) selectedCategory = newName
     editingCategory = ""
+    editingLimitCategory = ""
     persistState()
     showFeedback("Renamed category to: " + newName)
     return true
   }
 
   function deleteCategory(name) {
-    var res = Model.deleteCategory(categories, expenses, name)
+    var res = Model.deleteCategory(categories, expenses, name, categoryLimits)
     if (!res.ok) {
       showFeedback(res.error || "Failed to delete category")
       return false
     }
     categories = res.categories
     expenses = res.expenses
+    categoryLimits = Object.assign({}, res.categoryLimits)
     if (selectedCategory === name) {
       selectedCategory = categories.length > 0 ? categories[0] : "Other"
     }
     editingCategory = ""
+    editingLimitCategory = ""
     persistState()
     showFeedback("Deleted category '" + name + "'" + (res.fallback ? " (assigned expenses to " + res.fallback + ")" : ""))
     return true
@@ -173,6 +197,9 @@ Panel {
       categories = newCats
     }
 
+    // Check limit before adding
+    var limitCheck = Model.checkCategoryLimit(cat, amt, monthlyExpenses, categoryLimits)
+
     var newExp = Model.createExpense(amt, cat, noteStr)
     if (!newExp) return false
 
@@ -181,7 +208,13 @@ Panel {
     expenses = expList
     persistState()
 
-    showFeedback("Added " + Model.formatMoney(amt) + " to " + cat + "!")
+    if (limitCheck.hasLimit && limitCheck.isOver) {
+      showFeedback("Added " + Model.formatMoney(amt) + " to " + cat + "! ⚠ OVER LIMIT by " + Model.formatMoney(limitCheck.excess) + " (" + Model.formatMoney(limitCheck.newTotal) + " / " + Model.formatMoney(limitCheck.limit) + ")")
+    } else if (limitCheck.hasLimit) {
+      showFeedback("Added " + Model.formatMoney(amt) + " to " + cat + " (" + Model.formatMoney(limitCheck.remaining) + " left of " + Model.formatMoney(limitCheck.limit) + ")")
+    } else {
+      showFeedback("Added " + Model.formatMoney(amt) + " to " + cat + "!")
+    }
     return true
   }
 
@@ -271,6 +304,12 @@ Panel {
     function moveCategory(fromIndex: int, toIndex: int): string {
       return root.moveCategory(fromIndex, toIndex) ? "ok" : "invalid"
     }
+    function setLimit(category: string, limit: string): string {
+      return root.setCategoryLimit(category, limit) ? "ok" : "invalid"
+    }
+    function getLimits(): string {
+      return JSON.stringify(root.categoryLimits || {})
+    }
   }
 
   // Bar icon button
@@ -307,6 +346,7 @@ Panel {
         || customCatInput.activeFocus
         || newCategoryInput.activeFocus
         || root.editingCategory !== ""
+        || root.editingLimitCategory !== ""
         || root.dragActiveIndex !== -1
       onCloseRequested: root.close()
 
@@ -741,6 +781,7 @@ Panel {
                 onClicked: {
                   root.managingCategories = !root.managingCategories
                   root.editingCategory = ""
+                  root.editingLimitCategory = ""
                 }
               }
             }
@@ -761,31 +802,69 @@ Panel {
 
                   Item {
                     width: parent.width
-                    implicitHeight: Math.max(catText.implicitHeight, catTotalText.implicitHeight)
+                    implicitHeight: Math.max(catLeftRow.implicitHeight, catTotalText.implicitHeight)
 
-                    Text {
-                      id: catText
+                    Row {
+                      id: catLeftRow
                       anchors.left: parent.left
                       anchors.right: catTotalText.left
                       anchors.rightMargin: Style.space(8)
                       anchors.verticalCenter: parent.verticalCenter
-                      text: modelData.category
-                      color: modelData.total > 0 ? root.foreground : root.dim
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.bodySmall
-                      font.bold: modelData.total > 0
-                      elide: Text.ElideRight
+                      spacing: Style.space(6)
+
+                      Text {
+                        id: catText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.category
+                        color: modelData.isOverLimit ? root.urgent : (modelData.total > 0 ? root.foreground : root.dim)
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.bodySmall
+                        font.bold: modelData.total > 0 || modelData.isOverLimit
+                        elide: Text.ElideRight
+                      }
+
+                      BorderSurface {
+                        id: overLimitBadge
+                        visible: modelData.isOverLimit
+                        anchors.verticalCenter: parent.verticalCenter
+                        implicitHeight: Style.space(16)
+                        implicitWidth: overLimitBadgeText.implicitWidth + Style.space(8)
+                        radius: 3
+                        color: Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.18)
+                        border.color: root.urgent
+                        border.width: 1
+
+                        Text {
+                          id: overLimitBadgeText
+                          anchors.centerIn: parent
+                          text: "OVER LIMIT"
+                          color: root.urgent
+                          font.family: root.fontFamily
+                          font.pixelSize: 9
+                          font.bold: true
+                        }
+                      }
                     }
 
                     Text {
                       id: catTotalText
                       anchors.right: parent.right
                       anchors.verticalCenter: parent.verticalCenter
-                      text: Model.formatMoney(modelData.total) + (modelData.total > 0 && root.totalSpent > 0 ? " (" + modelData.percent + "%)" : "")
-                      color: modelData.total > 0 ? root.foreground : root.dim
+                      text: {
+                        if (modelData.limit > 0) {
+                          if (modelData.isOverLimit) {
+                            return Model.formatMoney(modelData.total) + " / " + Model.formatMoney(modelData.limit) + " (" + Model.formatMoney(modelData.total - modelData.limit) + " over!)"
+                          } else {
+                            return Model.formatMoney(modelData.total) + " / " + Model.formatMoney(modelData.limit) + " (" + Model.formatMoney(modelData.remaining) + " left)"
+                          }
+                        } else {
+                          return Model.formatMoney(modelData.total) + (modelData.total > 0 && root.totalSpent > 0 ? " (" + modelData.percent + "% of spending)" : "")
+                        }
+                      }
+                      color: modelData.isOverLimit ? root.urgent : (modelData.total > 0 ? root.foreground : root.dim)
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.bodySmall
-                      font.bold: modelData.total > 0
+                      font.bold: modelData.total > 0 || modelData.isOverLimit
                     }
                   }
 
@@ -794,14 +873,28 @@ Panel {
                     width: parent.width
                     height: Style.space(3)
                     radius: 2
-                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                    color: modelData.isOverLimit
+                      ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.15)
+                      : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
 
                     Rectangle {
                       height: parent.height
-                      width: modelData.total > 0 ? Math.max(2, parent.width * (modelData.percent / 100)) : 0
+                      width: {
+                        if (modelData.limit > 0) {
+                          return Math.max(2, Math.min(parent.width, parent.width * Math.min(1.0, modelData.total / modelData.limit)))
+                        } else {
+                          return modelData.total > 0 ? Math.max(2, parent.width * (modelData.percent / 100)) : 0
+                        }
+                      }
                       radius: 2
-                      color: root.accent
-                      visible: modelData.total > 0
+                      color: {
+                        if (modelData.limit > 0) {
+                          return modelData.isOverLimit ? root.urgent : root.accent
+                        } else {
+                          return Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
+                        }
+                      }
+                      visible: modelData.total > 0 || modelData.limit > 0
                     }
                   }
                 }
@@ -896,7 +989,7 @@ Panel {
                       cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                       hoverEnabled: true
                       preventStealing: true
-                      visible: root.editingCategory === ""
+                      visible: root.editingCategory === "" && root.editingLimitCategory === ""
 
                       onPressed: function(mouse) {
                         root.dragActiveIndex = slotItem.index
@@ -943,7 +1036,7 @@ Panel {
                       readonly property bool isDragged: root.dragActiveIndex === slotItem.index
                       property real dragY: 0
                       width: parent.width
-                      implicitHeight: (root.editingCategory === slotItem.modelData ? editCardItem.height : displayCardItem.height) + Style.space(16)
+                      implicitHeight: (root.editingCategory === slotItem.modelData ? editCardItem.height : (root.editingLimitCategory === slotItem.modelData ? editLimitCardItem.height : displayCardItem.height)) + Style.space(16)
                       height: implicitHeight
                       radius: Style.cornerRadius
                       border.color: isDragged ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
@@ -963,13 +1056,13 @@ Panel {
                       // Display Row (When not editing this item)
                       Item {
                         id: displayCardItem
-                        visible: root.editingCategory !== slotItem.modelData
+                        visible: root.editingCategory !== slotItem.modelData && root.editingLimitCategory !== slotItem.modelData
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.leftMargin: Style.space(8)
                         anchors.rightMargin: Style.space(10)
-                        height: Math.max(catNameLabel.implicitHeight, actionBtns.implicitHeight, Style.space(26))
+                        height: Math.max(catNameCol.implicitHeight, actionBtns.implicitHeight, Style.space(32))
 
                         // Visual grip dots
                         Item {
@@ -997,26 +1090,55 @@ Panel {
                           }
                         }
 
-                        Text {
-                          id: catNameLabel
+                        Column {
+                          id: catNameCol
                           anchors.left: dragHandle.right
                           anchors.right: actionBtns.left
                           anchors.leftMargin: Style.space(6)
                           anchors.rightMargin: Style.space(8)
                           anchors.verticalCenter: parent.verticalCenter
-                          text: slotItem.modelData
-                          color: root.foreground
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.bodySmall
-                          font.bold: true
-                          elide: Text.ElideRight
+                          spacing: Style.space(2)
+
+                          Text {
+                            id: catNameLabel
+                            text: slotItem.modelData
+                            color: root.foreground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.bold: true
+                            elide: Text.ElideRight
+                            width: parent.width
+                          }
+
+                          Text {
+                            readonly property real lim: (root.categoryLimits && root.categoryLimits[slotItem.modelData]) || 0
+                            text: lim > 0 ? "Limit: " + Model.formatMoney(lim) : "No limit set"
+                            color: lim > 0 ? root.accent : root.dim
+                            font.family: root.fontFamily
+                            font.pixelSize: 10
+                            font.bold: lim > 0
+                          }
                         }
 
                         Row {
                           id: actionBtns
                           anchors.right: parent.right
                           anchors.verticalCenter: parent.verticalCenter
-                          spacing: Style.space(6)
+                          spacing: Style.space(4)
+
+                          Button {
+                            text: "Limit"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: {
+                              root.editingCategory = ""
+                              var curLim = (root.categoryLimits && root.categoryLimits[slotItem.modelData]) || ""
+                              limitInput.text = curLim > 0 ? String(curLim) : ""
+                              root.editingLimitCategory = slotItem.modelData
+                            }
+                          }
 
                           Button {
                             text: "Rename"
@@ -1025,6 +1147,7 @@ Panel {
                             verticalPadding: Style.space(4)
                             horizontalPadding: Style.space(8)
                             onClicked: {
+                              root.editingLimitCategory = ""
                               renameInput.text = slotItem.modelData
                               root.editingCategory = slotItem.modelData
                             }
@@ -1041,7 +1164,86 @@ Panel {
                         }
                       }
 
-                      // Edit Row (When editing this item)
+                      // Limit Edit Row (When setting limit for this item)
+                      Item {
+                        id: editLimitCardItem
+                        visible: root.editingLimitCategory === slotItem.modelData
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(10)
+                        height: Math.max(limitInput.implicitHeight, limitActions.implicitHeight, Style.space(30))
+
+                        Row {
+                          anchors.left: parent.left
+                          anchors.right: limitActions.left
+                          anchors.rightMargin: Style.space(8)
+                          anchors.verticalCenter: parent.verticalCenter
+                          spacing: Style.space(6)
+
+                          Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Limit $"
+                            color: root.foreground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.bold: true
+                          }
+
+                          TextField {
+                            id: limitInput
+                            width: Style.space(100)
+                            placeholderText: "0.00"
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            onAccepted: saveLimitBtn.clicked()
+                          }
+                        }
+
+                        Row {
+                          id: limitActions
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          spacing: Style.space(4)
+
+                          Button {
+                            id: saveLimitBtn
+                            text: "Save"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: {
+                              root.setCategoryLimit(slotItem.modelData, limitInput.text)
+                              root.editingLimitCategory = ""
+                            }
+                          }
+
+                          Button {
+                            text: "Clear"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            visible: !!(root.categoryLimits && root.categoryLimits[slotItem.modelData] > 0)
+                            onClicked: {
+                              root.setCategoryLimit(slotItem.modelData, 0)
+                              root.editingLimitCategory = ""
+                            }
+                          }
+
+                          Button {
+                            text: "Cancel"
+                            bordered: true
+                            fontSize: Style.font.caption
+                            verticalPadding: Style.space(4)
+                            horizontalPadding: Style.space(8)
+                            onClicked: root.editingLimitCategory = ""
+                          }
+                        }
+                      }
+
+                      // Rename Edit Row (When editing this item)
                       Item {
                         id: editCardItem
                         visible: root.editingCategory === slotItem.modelData

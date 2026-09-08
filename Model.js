@@ -19,6 +19,7 @@ function defaultState() {
     income: 0,
     savingsPercent: 20,
     categories: defaultCategories.slice(),
+    categoryLimits: {},
     expenses: []
   };
 }
@@ -42,6 +43,18 @@ function parseState(raw) {
       state.categories = parsed.categories.filter(function(c) {
         return typeof c === "string" && c.trim() !== "";
       });
+    }
+    if (parsed.categoryLimits && typeof parsed.categoryLimits === "object" && !Array.isArray(parsed.categoryLimits)) {
+      var limits = {};
+      for (var catKey in parsed.categoryLimits) {
+        if (Object.prototype.hasOwnProperty.call(parsed.categoryLimits, catKey)) {
+          var limVal = Number(parsed.categoryLimits[catKey]);
+          if (isFinite(limVal) && limVal > 0) {
+            limits[catKey] = Math.round(limVal * 100) / 100;
+          }
+        }
+      }
+      state.categoryLimits = limits;
     }
     if (Array.isArray(parsed.expenses)) {
       state.expenses = parsed.expenses.filter(function(e) {
@@ -106,10 +119,11 @@ function remainingBudget(income, savingsPercent, expenses) {
   return Math.round((inc - target - spent) * 100) / 100;
 }
 
-function categoryTotals(expenses, allCategories) {
+function categoryTotals(expenses, allCategories, categoryLimits) {
   var totals = {};
   var counts = {};
   var cats = Array.isArray(allCategories) ? allCategories.slice() : defaultCategories.slice();
+  var limits = (categoryLimits && typeof categoryLimits === "object") ? categoryLimits : {};
 
   for (var i = 0; i < cats.length; i++) {
     totals[cats[i]] = 0;
@@ -136,13 +150,22 @@ function categoryTotals(expenses, allCategories) {
   var result = [];
   for (var k = 0; k < cats.length; k++) {
     var name = cats[k];
-    var amt = totals[name] || 0;
-    var pct = totalSpent > 0 ? (amt / totalSpent) * 100 : 0;
+    var spentAmt = totals[name] || 0;
+    var pct = totalSpent > 0 ? (spentAmt / totalSpent) * 100 : 0;
+    var lim = (typeof limits[name] === "number" && limits[name] > 0) ? limits[name] : 0;
+    var rem = lim > 0 ? Math.round((lim - spentAmt) * 100) / 100 : null;
+    var isOver = lim > 0 && spentAmt > lim;
+    var limitPct = lim > 0 ? Math.round((spentAmt / lim) * 100 * 10) / 10 : null;
+
     result.push({
       category: name,
-      total: Math.round(amt * 100) / 100,
+      total: Math.round(spentAmt * 100) / 100,
       percent: Math.round(pct * 10) / 10,
-      count: counts[name] || 0
+      count: counts[name] || 0,
+      limit: lim,
+      remaining: rem,
+      isOverLimit: isOver,
+      limitPercent: limitPct
     });
   }
 
@@ -210,12 +233,13 @@ function addCategory(categories, name) {
   return { ok: true, categories: updated };
 }
 
-function renameCategory(categories, expenses, oldName, newName) {
+function renameCategory(categories, expenses, oldName, newName, categoryLimits) {
   if (!Array.isArray(categories)) return { ok: false, error: "Invalid categories" };
   var from = String(oldName || "").trim();
   var to = String(newName || "").trim();
   if (!from || !to) return { ok: false, error: "Names cannot be empty" };
-  if (from === to) return { ok: true, categories: categories, expenses: expenses };
+  var updatedLimits = (categoryLimits && typeof categoryLimits === "object") ? Object.assign({}, categoryLimits) : {};
+  if (from === to) return { ok: true, categories: categories, expenses: expenses, categoryLimits: updatedLimits };
 
   var fromIdx = -1;
   for (var i = 0; i < categories.length; i++) {
@@ -242,10 +266,15 @@ function renameCategory(categories, expenses, oldName, newName) {
     return e;
   }) : [];
 
-  return { ok: true, categories: updatedCats, expenses: updatedExps };
+  if (Object.prototype.hasOwnProperty.call(updatedLimits, from)) {
+    updatedLimits[to] = updatedLimits[from];
+    delete updatedLimits[from];
+  }
+
+  return { ok: true, categories: updatedCats, expenses: updatedExps, categoryLimits: updatedLimits };
 }
 
-function deleteCategory(categories, expenses, name) {
+function deleteCategory(categories, expenses, name, categoryLimits) {
   if (!Array.isArray(categories)) return { ok: false, error: "Invalid categories" };
   var target = String(name || "").trim();
   if (!target) return { ok: false, error: "Category name cannot be empty" };
@@ -277,7 +306,58 @@ function deleteCategory(categories, expenses, name) {
     return e;
   }) : [];
 
-  return { ok: true, categories: updatedCats, expenses: updatedExps, fallback: fallback };
+  var updatedLimits = (categoryLimits && typeof categoryLimits === "object") ? Object.assign({}, categoryLimits) : {};
+  if (Object.prototype.hasOwnProperty.call(updatedLimits, target)) {
+    delete updatedLimits[target];
+  }
+
+  return { ok: true, categories: updatedCats, expenses: updatedExps, fallback: fallback, categoryLimits: updatedLimits };
+}
+
+function setCategoryLimit(categoryLimits, name, limit) {
+  var cat = String(name || "").trim();
+  if (!cat) return { ok: false, error: "Category name cannot be empty" };
+  var current = (categoryLimits && typeof categoryLimits === "object") ? Object.assign({}, categoryLimits) : {};
+  var val = parseFloat(limit);
+  if (isNaN(val) || val <= 0) {
+    delete current[cat];
+    return { ok: true, categoryLimits: current, limit: 0, removed: true };
+  }
+  var rounded = Math.round(val * 100) / 100;
+  current[cat] = rounded;
+  return { ok: true, categoryLimits: current, limit: rounded, removed: false };
+}
+
+function checkCategoryLimit(category, newAmount, monthlyExpenses, categoryLimits) {
+  var cat = String(category || "").trim();
+  var lim = (categoryLimits && typeof categoryLimits[cat] === "number" && categoryLimits[cat] > 0) ? categoryLimits[cat] : 0;
+  if (lim <= 0) return { hasLimit: false };
+
+  var currentTotal = 0;
+  if (Array.isArray(monthlyExpenses)) {
+    for (var i = 0; i < monthlyExpenses.length; i++) {
+      if (monthlyExpenses[i] && monthlyExpenses[i].category === cat) {
+        currentTotal += Number(monthlyExpenses[i].amount) || 0;
+      }
+    }
+  }
+  var addAmt = parseFloat(newAmount) || 0;
+  var newTotal = Math.round((currentTotal + addAmt) * 100) / 100;
+  var wasOver = currentTotal > lim;
+  var isOver = newTotal > lim;
+  var excess = isOver ? Math.round((newTotal - lim) * 100) / 100 : 0;
+  var remaining = Math.round((lim - newTotal) * 100) / 100;
+
+  return {
+    hasLimit: true,
+    limit: lim,
+    previousTotal: Math.round(currentTotal * 100) / 100,
+    newTotal: newTotal,
+    wasOver: wasOver,
+    isOver: isOver,
+    excess: excess,
+    remaining: remaining
+  };
 }
 
 function moveCategory(categories, fromIndex, toIndex) {
