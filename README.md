@@ -64,6 +64,12 @@ rm -f ~/.local/state/omarchy/budget.json
 - **Omarchy Menu**: Search `budget` or `spending` from <kbd>Super</kbd> + <kbd>Space</kbd>.
 - **Manage Categories & Limits**: Click the **Manage** button in the popup to add new categories, rename existing ones, delete categories (expenses are moved to "Other"), grab the handle on any category card to smoothly drag and reorder, or click **Limit** on any category card to set or clear its spending cap.
 
+### Understanding Category Progress Meters
+
+The progress meters in the Category Running Totals view adapt automatically:
+- **Categories with a spending limit**: The bar tracks your **budget allowance consumed** ($\text{Spent} / \text{Limit}$). It displays `$Spent / $Limit ($Remaining left)` in your accent theme color, and turns urgent red with an `OVER LIMIT` badge when exceeded.
+- **Categories without a spending limit**: For expected fixed expenses (such as Rent & Bills) that you don't cap, the bar displays that category's **proportional share of total monthly expenses** ($\text{Category Spent} / \text{Total Spent}$). This lets you see where the bulk of your monthly cash flow went at a glance.
+
 ### CLI Commands
 ```bash
 # Toggle UI popup
