@@ -63,6 +63,7 @@ rm -f ~/.local/state/omarchy/budget.json
 - **Super + B**: Toggle the budget panel popup.
 - **Omarchy Menu**: Search `budget` or `spending` from <kbd>Super</kbd> + <kbd>Space</kbd>.
 - **Manage Categories & Limits**: Click the **Manage** button in the popup to add new categories, rename existing ones, delete categories (expenses are moved to "Other"), grab the handle on any category card to smoothly drag and reorder, or click **Limit** on any category card to set or clear its spending cap.
+- **All Transactions Window**: Click the **View All →** button next to Recent Transactions to open the full transactions menu. View, search, and filter all recorded purchases by month and category with instant totals.
 
 ### Understanding Category Progress Meters
 
@@ -74,6 +75,9 @@ The progress meters in the Category Running Totals view adapt automatically:
 ```bash
 # Toggle UI popup
 omarchy-budget
+
+# Open All Transactions window directly in popup
+omarchy-budget transactions
 
 # View terminal budget summary
 omarchy-budget status
@@ -98,8 +102,9 @@ omarchy-budget category rename "Old" "New"    # Rename category
 omarchy-budget category delete "Category"     # Delete category
 omarchy-budget category move 0 3              # Reorder category from index 0 to 3
 
-# List transactions
+# List transactions (current month, or all recorded)
 omarchy-budget list
+omarchy-budget list all
 ```
 
 ## License

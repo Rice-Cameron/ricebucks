@@ -93,13 +93,36 @@ function savingsAmount(income, savingsPercent) {
   return Math.round(inc * (pct / 100) * 100) / 100;
 }
 
+function expenseMonthKey(dateStr) {
+  if (!dateStr) return "";
+  var s = String(dateStr).trim();
+  if (s.indexOf("T") === -1 && (s.length === 7 || s.length === 10)) {
+    return s.slice(0, 7);
+  }
+  try {
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      var year = d.getFullYear();
+      var month = String(d.getMonth() + 1).padStart(2, "0");
+      return year + "-" + month;
+    }
+  } catch (e) {}
+  return s.slice(0, 7);
+}
+
 function filterExpensesByMonth(expenses, monthKey) {
   if (!Array.isArray(expenses)) return [];
   var target = monthKey || currentMonthKey();
-  return expenses.filter(function(e) {
+  var filtered = expenses.filter(function(e) {
     if (!e || !e.date) return false;
-    return String(e.date).indexOf(target) === 0;
+    return expenseMonthKey(e.date) === target;
   });
+  filtered.sort(function(a, b) {
+    var ta = new Date(a.date).getTime() || 0;
+    var tb = new Date(b.date).getTime() || 0;
+    return tb - ta;
+  });
+  return filtered;
 }
 
 function totalExpenses(expenses) {
@@ -206,6 +229,25 @@ function formatShortDate(isoString) {
   }
 }
 
+function localIsoString(d) {
+  d = d || new Date();
+  var pad = function(n) { return String(n).padStart(2, "0"); };
+  var pad3 = function(n) { return String(n).padStart(3, "0"); };
+  var year = d.getFullYear();
+  var month = pad(d.getMonth() + 1);
+  var day = pad(d.getDate());
+  var hours = pad(d.getHours());
+  var minutes = pad(d.getMinutes());
+  var seconds = pad(d.getSeconds());
+  var ms = pad3(d.getMilliseconds());
+  var offsetMinutes = -d.getTimezoneOffset();
+  var sign = offsetMinutes >= 0 ? "+" : "-";
+  var absOffset = Math.abs(offsetMinutes);
+  var offsetHours = pad(Math.floor(absOffset / 60));
+  var offsetMins = pad(absOffset % 60);
+  return year + "-" + month + "-" + day + "T" + hours + ":" + minutes + ":" + seconds + "." + ms + sign + offsetHours + ":" + offsetMins;
+}
+
 function createExpense(amount, category, note) {
   var amt = parseFloat(amount);
   if (!isFinite(amt) || amt <= 0) return null;
@@ -214,7 +256,7 @@ function createExpense(amount, category, note) {
     amount: Math.round(amt * 100) / 100,
     category: String(category || "Other").trim(),
     note: String(note || "").trim(),
-    date: new Date().toISOString()
+    date: localIsoString()
   };
 }
 
@@ -370,3 +412,84 @@ function moveCategory(categories, fromIndex, toIndex) {
   updated.splice(to, 0, item);
   return updated;
 }
+
+function availableMonths(expenses) {
+  if (!Array.isArray(expenses)) return [];
+  var set = {};
+  var months = [];
+  var cur = currentMonthKey();
+  set[cur] = true;
+  months.push(cur);
+
+  for (var i = 0; i < expenses.length; i++) {
+    if (expenses[i] && expenses[i].date) {
+      var k = expenseMonthKey(expenses[i].date);
+      if (k && !set[k]) {
+        set[k] = true;
+        months.push(k);
+      }
+    }
+  }
+  months.sort().reverse();
+  return months;
+}
+
+function monthFilterOptions(expenses) {
+  var months = availableMonths(expenses);
+  var cur = currentMonthKey();
+  var opts = [
+    { value: "all", label: "All Months" },
+    { value: cur, label: "This Month (" + monthLabel(cur) + ")" }
+  ];
+  for (var i = 0; i < months.length; i++) {
+    if (months[i] !== cur) {
+      opts.push({ value: months[i], label: monthLabel(months[i]) });
+    }
+  }
+  return opts;
+}
+
+function filterTransactions(expenses, query, monthKey, category) {
+  if (!Array.isArray(expenses)) return [];
+  var q = String(query || "").trim().toLowerCase();
+  var m = String(monthKey || "").trim();
+  var cat = String(category || "").trim();
+
+  var res = expenses.filter(function(e) {
+    if (!e || typeof e !== "object") return false;
+    
+    // Month filter
+    if (m && m !== "all") {
+      var expM = expenseMonthKey(e.date);
+      var targetM = (m === "current") ? currentMonthKey() : m;
+      if (expM !== targetM) return false;
+    }
+
+    // Category filter
+    if (cat && cat !== "all" && cat !== "All Categories") {
+      if (String(e.category || "").toLowerCase() !== cat.toLowerCase()) return false;
+    }
+
+    // Text search query
+    if (q) {
+      var noteMatch = String(e.note || "").toLowerCase().indexOf(q) !== -1;
+      var catMatch = String(e.category || "").toLowerCase().indexOf(q) !== -1;
+      var amtMatch = String(e.amount || "").indexOf(q) !== -1;
+      var dateMatch = String(e.date || "").toLowerCase().indexOf(q) !== -1;
+      var formattedDate = formatShortDate(e.date).toLowerCase();
+      var formattedDateMatch = formattedDate.indexOf(q) !== -1;
+      if (!noteMatch && !catMatch && !amtMatch && !dateMatch && !formattedDateMatch) return false;
+    }
+
+    return true;
+  });
+
+  res.sort(function(a, b) {
+    var ta = new Date(a.date).getTime() || 0;
+    var tb = new Date(b.date).getTime() || 0;
+    return tb - ta;
+  });
+
+  return res;
+}
+

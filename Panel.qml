@@ -46,6 +46,34 @@ Panel {
   readonly property bool isOverBudget: income > 0 && remaining < 0
   readonly property var categoryData: Model.categoryTotals(monthlyExpenses, categories, categoryLimits)
 
+  // Transactions menu view state
+  property bool viewingAllTransactions: false
+  property string selectedMonthKey: "all"
+  property string selectedCategoryFilter: "All Categories"
+  property string txSearchText: ""
+
+  readonly property var monthFilterOptions: Model.monthFilterOptions(expenses)
+  readonly property var categoryFilterOptions: [{ value: "all", label: "All Categories" }].concat(categories.map(function(c) { return { value: c, label: c } }))
+  readonly property var filteredTransactions: Model.filterTransactions(expenses, txSearchText, selectedMonthKey, selectedCategoryFilter)
+  readonly property real filteredTransactionsTotal: Model.totalExpenses(filteredTransactions)
+
+  function showAllTransactions() {
+    viewingAllTransactions = true
+    flickArea.contentY = 0
+  }
+
+  function showMainView() {
+    viewingAllTransactions = false
+    flickArea.contentY = 0
+  }
+
+  onOpenedChanged: {
+    if (!opened) {
+      viewingAllTransactions = false
+      txSearchText = ""
+    }
+  }
+
   // Feedback message
   property string feedbackText: ""
 
@@ -270,6 +298,10 @@ Panel {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
+    function openTransactions(): void {
+      root.showAllTransactions()
+      root.open()
+    }
     function status(): string {
       return JSON.stringify({
         income: root.income,
@@ -334,7 +366,10 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(500))
-    contentHeight: panel.fittedContentHeight(scrollContent.implicitHeight + Style.space(24), Style.space(700))
+    contentHeight: panel.fittedContentHeight(
+      (root.viewingAllTransactions ? allTxColumn.implicitHeight : scrollContent.implicitHeight) + Style.space(24),
+      Style.space(700)
+    )
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -345,17 +380,28 @@ Panel {
         || savingsInput.activeFocus
         || customCatInput.activeFocus
         || newCategoryInput.activeFocus
+        || (root.viewingAllTransactions && txSearchInput.activeFocus)
         || root.editingCategory !== ""
         || root.editingLimitCategory !== ""
         || root.dragActiveIndex !== -1
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.viewingAllTransactions) {
+          if (root.txSearchText !== "") {
+            root.txSearchText = ""
+          } else {
+            root.showMainView()
+          }
+        } else {
+          root.close()
+        }
+      }
 
       Flickable {
         id: flickArea
         anchors.fill: parent
         interactive: root.dragActiveIndex === -1
-        contentWidth: scrollContent.width
-        contentHeight: scrollContent.implicitHeight
+        contentWidth: root.viewingAllTransactions ? allTxColumn.width : scrollContent.width
+        contentHeight: root.viewingAllTransactions ? allTxColumn.implicitHeight : scrollContent.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
@@ -363,6 +409,7 @@ Panel {
 
         Column {
           id: scrollContent
+          visible: !root.viewingAllTransactions
           width: flickArea.width - Style.space(16)
           anchors.left: parent.left
           anchors.leftMargin: Style.space(2)
@@ -1385,9 +1432,27 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            PanelSectionHeader {
-              text: "RECENT TRANSACTIONS (" + root.monthlyExpenses.length + ")"
-              foreground: root.foreground
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(recentHeaderLabel.implicitHeight, viewAllBtn.implicitHeight)
+
+              PanelSectionHeader {
+                id: recentHeaderLabel
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "RECENT TRANSACTIONS (" + root.monthlyExpenses.length + ")"
+                foreground: root.foreground
+              }
+
+              Button {
+                id: viewAllBtn
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "View All (" + root.expenses.length + ") →"
+                bordered: true
+                fontSize: Style.font.caption
+                onClicked: root.showAllTransactions()
+              }
             }
 
             Text {
@@ -1497,6 +1562,323 @@ Panel {
             height: Style.space(8)
           }
 
+        }
+
+        // =================================================================
+        // ALL TRANSACTIONS VIEW
+        // =================================================================
+        Column {
+          id: allTxColumn
+          visible: root.viewingAllTransactions
+          width: flickArea.width - Style.space(16)
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(2)
+          spacing: Style.space(12)
+
+          // 1. Header with Back button, Title, Count, and Close
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(allTxHeaderLeft.implicitHeight, allTxCloseBtn.implicitHeight)
+
+            Row {
+              id: allTxHeaderLeft
+              anchors.left: parent.left
+              anchors.right: allTxCloseBtn.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(10)
+
+              Button {
+                id: allTxBackBtn
+                text: "← Back"
+                bordered: true
+                fontSize: Style.font.caption
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.showMainView()
+              }
+
+              Column {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+
+                Text {
+                  text: root.selectedMonthKey === "all" ? "All Transactions" : Model.monthLabel(root.selectedMonthKey === "current" ? root.currentMonth : root.selectedMonthKey)
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title
+                  font.bold: true
+                }
+
+                Text {
+                  text: root.filteredTransactions.length + " of " + root.expenses.length + " recorded"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+
+            Button {
+              id: allTxCloseBtn
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: "✕"
+              bordered: false
+              fontSize: Style.font.bodySmall
+              onClicked: root.close()
+            }
+          }
+
+          // Feedback banner if any
+          BorderSurface {
+            visible: root.feedbackText !== ""
+            width: parent.width
+            implicitHeight: allTxFeedbackTextLabel.implicitHeight + Style.space(14)
+            height: implicitHeight
+            radius: Style.cornerRadius
+            color: Style.selectedFillFor(root.foreground, root.accent)
+
+            Text {
+              id: allTxFeedbackTextLabel
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(12)
+              anchors.rightMargin: Style.space(12)
+              text: root.feedbackText
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+          }
+
+          // 2. Search row
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            TextField {
+              id: txSearchInput
+              width: parent.width - (root.txSearchText !== "" ? Style.space(78) : 0)
+              placeholderText: "Search note, category, or $..."
+              text: root.txSearchText
+              onTextChanged: root.txSearchText = text
+              Keys.onEscapePressed: function(event) {
+                if (text !== "") {
+                  text = ""
+                  root.txSearchText = ""
+                } else {
+                  focus = false
+                  root.showMainView()
+                }
+                event.accepted = true
+              }
+            }
+
+            Button {
+              visible: root.txSearchText !== ""
+              width: Style.space(70)
+              text: "Clear"
+              bordered: true
+              fontSize: Style.font.caption
+              anchors.verticalCenter: parent.verticalCenter
+              onClicked: {
+                txSearchInput.text = ""
+                root.txSearchText = ""
+              }
+            }
+          }
+
+          // 3. Month & Category Filter Dropdowns
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            Dropdown {
+              id: monthFilterDropdown
+              width: (parent.width - Style.space(8)) / 2
+              options: root.monthFilterOptions
+              value: root.selectedMonthKey
+              showLabel: false
+              onChanged: function(newVal) {
+                root.selectedMonthKey = newVal
+              }
+            }
+
+            Dropdown {
+              id: categoryFilterDropdown
+              width: (parent.width - Style.space(8)) / 2
+              options: root.categoryFilterOptions
+              value: root.selectedCategoryFilter
+              showLabel: false
+              onChanged: function(newVal) {
+                root.selectedCategoryFilter = newVal
+              }
+            }
+          }
+
+          // 4. Summary card
+          BorderSurface {
+            width: parent.width
+            implicitHeight: txSummaryRow.implicitHeight + Style.space(22)
+            height: implicitHeight
+            radius: Style.cornerRadius
+            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+            border.width: 1
+            color: Style.controlFill(false, false, root.foreground, root.accent)
+
+            Item {
+              id: txSummaryRow
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(12)
+              anchors.rightMargin: Style.space(12)
+              implicitHeight: Math.max(txSummaryLeft.implicitHeight, txSummaryRight.implicitHeight)
+              height: implicitHeight
+
+              Row {
+                id: txSummaryLeft
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+
+                Text {
+                  text: "TOTAL:"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                  text: Model.formatMoney(root.filteredTransactionsTotal)
+                  color: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title
+                  font.bold: true
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+
+              Text {
+                id: txSummaryRight
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.filteredTransactions.length + (root.filteredTransactions.length === 1 ? " transaction" : " transactions")
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+            }
+          }
+
+          PanelSeparator { foreground: root.foreground }
+
+          // 5. Empty state or List
+          Text {
+            visible: root.filteredTransactions.length === 0
+            text: root.txSearchText !== "" || root.selectedCategoryFilter !== "All Categories" || root.selectedMonthKey !== "all"
+              ? "No transactions match your search/filter."
+              : "No transactions recorded yet."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            horizontalAlignment: Text.AlignHCenter
+            width: parent.width
+            topPadding: Style.space(24)
+            bottomPadding: Style.space(24)
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(6)
+            visible: root.filteredTransactions.length > 0
+
+            Repeater {
+              model: root.filteredTransactions
+
+              BorderSurface {
+                required property var modelData
+                width: parent.width
+                radius: Style.cornerRadius
+                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                border.width: 1
+                color: Style.controlFill(false, false, root.foreground, root.accent)
+                implicitHeight: allTxRowItem.height + Style.space(16)
+                height: implicitHeight
+
+                Item {
+                  id: allTxRowItem
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.leftMargin: Style.space(10)
+                  anchors.rightMargin: Style.space(10)
+                  height: Math.max(allTxInfoCol.implicitHeight, allTxAmountCol.implicitHeight)
+
+                  Column {
+                    id: allTxInfoCol
+                    anchors.left: parent.left
+                    anchors.right: allTxAmountCol.left
+                    anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(2)
+
+                    Row {
+                      spacing: Style.space(6)
+                      Text {
+                        text: modelData.category
+                        color: root.accent
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.bold: true
+                      }
+                      Text {
+                        text: Model.formatShortDate(modelData.date)
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    Text {
+                      visible: modelData.note !== ""
+                      text: modelData.note || ""
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      elide: Text.ElideRight
+                      width: parent.width
+                    }
+                  }
+
+                  Column {
+                    id: allTxAmountCol
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Text {
+                      text: Model.formatMoney(modelData.amount)
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      font.bold: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Bottom breathing room
+          Item {
+            width: parent.width
+            height: Style.space(8)
+          }
         }
       }
     }
