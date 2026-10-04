@@ -15,6 +15,7 @@
 
 set -euo pipefail
 
+PROGNAME="$(basename "$0")"
 STATE_FILE="$HOME/.local/state/omarchy/budget.json"
 
 ipc_call() {
@@ -56,9 +57,9 @@ cmd_limit() {
   local amount="${2:-}"
 
   if [[ -z "$category" ]]; then
-    echo "Usage: omarchy-budget limit <category> [amount]"
-    echo "Example: omarchy-budget limit \"Groceries\" 500"
-    echo "         omarchy-budget limit \"Groceries\" clear"
+    echo "Usage: $PROGNAME limit <category> [amount]"
+    echo "Example: $PROGNAME limit \"Groceries\" 500"
+    echo "         $PROGNAME limit \"Groceries\" clear"
     exit 1
   fi
 
@@ -107,8 +108,8 @@ cmd_add() {
   local note="${3:-}"
 
   if [[ -z "$amount" ]]; then
-    echo "Usage: omarchy-budget add <amount> [category] [note]"
-    echo "Example: omarchy-budget add 45.50 Groceries \"Trader Joe's\""
+    echo "Usage: $PROGNAME add <amount> [category] [note]"
+    echo "Example: $PROGNAME add 45.50 Groceries \"Trader Joe's\""
     exit 1
   fi
 
@@ -163,7 +164,7 @@ cmd_add() {
 cmd_income() {
   local amount="${1:-}"
   if [[ -z "$amount" ]]; then
-    echo "Usage: omarchy-budget income <amount>"
+    echo "Usage: $PROGNAME income <amount>"
     exit 1
   fi
 
@@ -179,7 +180,7 @@ cmd_income() {
 cmd_savings() {
   local pct="${1:-}"
   if [[ -z "$pct" ]]; then
-    echo "Usage: omarchy-budget savings <percent>"
+    echo "Usage: $PROGNAME savings <percent>"
     exit 1
   fi
 
@@ -417,7 +418,7 @@ cmd_category() {
       echo "✓ Reordered category from index $from to $to"
       ;;
     *)
-      echo "Usage: omarchy-budget category [list|add|rename|delete|move|limit] ..."
+      echo "Usage: $PROGNAME category [list|add|rename|delete|move|limit] ..."
       ;;
   esac
 }
@@ -455,21 +456,21 @@ case "$action" in
     cmd_category "$@"
     ;;
   *)
-    echo "Omarchy Budget & Spending Tracker"
+    echo "ricebucks: Omarchy Budget & Spending Tracker"
     echo "Usage:"
-    echo "  omarchy-budget                       Toggle popup in status bar"
-    echo "  omarchy-budget transactions          Open All Transactions window"
-    echo "  omarchy-budget add <amount> [cat] [note]  Add purchase"
-    echo "  omarchy-budget status                Show terminal overview"
-    echo "  omarchy-budget limit <cat> [amount]  Set/view category spending limit"
-    echo "  omarchy-budget income <amount>       Set monthly income"
-    echo "  omarchy-budget savings <percent>     Set savings goal percent"
-    echo "  omarchy-budget list [all]            List purchases (or all transactions)"
-    echo "  omarchy-budget categories            List all categories"
-    echo "  omarchy-budget category add <name>   Add category"
-    echo "  omarchy-budget category rename <old> <new>  Rename category"
-    echo "  omarchy-budget category delete <name>       Delete category"
-    echo "  omarchy-budget category move <from> <to>    Reorder category"
-    echo "  omarchy-budget category limit <cat> <amount> Set category limit"
+    echo "  $PROGNAME                       Toggle popup in status bar"
+    echo "  $PROGNAME transactions          Open All Transactions window"
+    echo "  $PROGNAME add <amount> [cat] [note]  Add purchase"
+    echo "  $PROGNAME status                Show terminal overview"
+    echo "  $PROGNAME limit <cat> [amount]  Set/view category spending limit"
+    echo "  $PROGNAME income <amount>       Set monthly income"
+    echo "  $PROGNAME savings <percent>     Set savings goal percent"
+    echo "  $PROGNAME list [all]            List purchases (or all transactions)"
+    echo "  $PROGNAME categories            List all categories"
+    echo "  $PROGNAME category add <name>   Add category"
+    echo "  $PROGNAME category rename <old> <new>  Rename category"
+    echo "  $PROGNAME category delete <name>       Delete category"
+    echo "  $PROGNAME category move <from> <to>    Reorder category"
+    echo "  $PROGNAME category limit <cat> <amount> Set category limit"
     ;;
 esac

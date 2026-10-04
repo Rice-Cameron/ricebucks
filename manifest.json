@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "cameronri.budget",
-  "name": "Budget Tracker",
+  "name": "ricebucks",
   "version": "1.0.0",
   "author": "cameronri",
   "description": "Monthly income, savings target, and category spending tracker",
@@ -12,7 +12,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Budget Tracker",
+    "displayName": "ricebucks",
     "description": "Spending and budget tracker with categories and savings targets",
     "category": "Finance",
     "defaultSection": "right",
